@@ -109,6 +109,8 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="card"><div class="lbl">投資評価額</div><div class="val num" id="hEval">—</div><div class="s num" id="hEvalPl"></div></div>
       <div class="card"><div class="lbl">前日差</div><div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
       <div class="card"><div class="lbl">投資可能資産</div><div class="val num" id="hAssets">—</div><div class="s num" id="hCash"></div></div>
+      <div class="card"><div class="lbl">前月差</div><div class="val num" id="hMDiff">—</div><div class="s num" id="hMDiffPct"></div></div>
+      <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
     </div>
     <h2 id="hHoldTitle">保有株</h2>
@@ -348,14 +350,21 @@ function renderHome(){
   const pl = ev-inv;
   $("hEvalPl").textContent = `評価損益 ${sign(pl)}`; $("hEvalPl").className = "s num "+cls(pl);
   const hist = S.history.history, today = new Date().toISOString().slice(0,10);
-  const prev = [...hist].reverse().find(r=>r.date < today);
-  if(prev && prev.evaluation!=null){
-    const d = ev - prev.evaluation;
-    $("hDiff").textContent = sign(d); $("hDiff").className = "val num "+cls(d);
-    $("hDiffPct").textContent = `${prev.date.slice(5).replace("-","/")}比 ${(d/prev.evaluation*100).toFixed(2)}%`;
-  } else { $("hDiff").textContent="—"; $("hDiffPct").textContent=""; }
   const cj = S.settings.cashJpy||0, cu = S.settings.cashUsd||0;
-  $("hAssets").textContent = yen(ev + cj + cu*fx);
+  const assetsNow = ev + cj + cu*fx;
+  // 差分は投資可能資産(評価額+余力)基準: 株の売買による現金⇄株式の移動に影響されない純粋な損益差
+  const lastBefore = d => [...hist].reverse().find(r => r.date < d && r.totalAssets != null);
+  const setDiff = (idV, idP, base) => {
+    if(base){
+      const d = assetsNow - base.totalAssets;
+      $(idV).textContent = sign(d); $(idV).className = "val num "+cls(d);
+      $(idP).textContent = `${base.date.slice(2)}比 ${(d>=0?"+":"−")+Math.abs(d/base.totalAssets*100).toFixed(2)}%`;
+    } else { $(idV).textContent="—"; $(idP).textContent="基準データなし"; }
+  };
+  setDiff("hDiff","hDiffPct", lastBefore(today));
+  setDiff("hMDiff","hMDiffPct", lastBefore(today.slice(0,7)+"-01"));            // 前月末
+  setDiff("hYDiff","hYDiffPct", lastBefore(today.slice(0,4)+"-01-01"));         // 前年末
+  $("hAssets").textContent = yen(assetsNow);
   $("hCash").textContent = `余力 ¥${fmt(cj,0)} + $${fmt(cu)}`;
   let realized=0;
   S.trades.trades.forEach(t=>{
@@ -544,7 +553,7 @@ function renderHistory(){
     const prev = arr[i+1];
     const d = prev&&r.totalAssets!=null&&prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
     return `<div class="row"><div><div class="l1 num" style="font-size:14px">${r.date}</div>
-      <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"}</div></div>
+      <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
       <div class="pct num ${d==null?"":cls(d)}">${d==null?"":sign(d)}</div></div></div>`;
   }).join("");
