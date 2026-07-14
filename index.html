@@ -68,6 +68,7 @@ table.kv td:last-child{text-align:right}
 .note{font-size:11px;color:var(--sub);margin:10px 2px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom));
   background:var(--ink);color:#fff;font-size:13px;padding:10px 18px;border-radius:20px;opacity:0;transition:opacity .25s;z-index:50;pointer-events:none;max-width:88%}
+.ext{font-size:10px;font-weight:500;color:#8A63D2;border:1px solid #8A63D2;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
 .toast.show{opacity:.95}
 #lock{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
 #lock .box{width:100%;max-width:360px}
@@ -392,16 +393,20 @@ function renderHome(){
       : `前日 ${(dv>=0?"+":"−")+fmt(Math.abs(dv), u?2:1)} (${(dp>=0?"+":"−")+Math.abs(dp).toFixed(2)}%)`;
     const plTxt = pl==null ? "損益 —"
       : `損益 ${sign(pl)} (${(pct>=0?"+":"−")+Math.abs(pct).toFixed(1)}%)`;
+    const sess = S.prices.session ? S.prices.session[String(t.code)] : null;
+    const badge = sess ? `<span class="ext">時間外</span>` : "";
+    const extNote = (sess && sess.regular!=null && p!=null)
+      ? `<div class="l2 num" style="margin-top:3px;font-size:11px">通常取引終値 ${sym}${fmt(sess.regular, u?2:1)}(${sess.phase==="pre"?"プレマーケット":"アフターマーケット"}で${(p-sess.regular>=0?"+":"−")+sym+fmt(Math.abs(p-sess.regular), u?2:1)})</div>` : "";
     return `<div class="row" onclick="openDetail(${t.id})" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span></span>
-        <span class="p num" style="font-weight:600">${cur}</span></div>
+        <span class="p num" style="font-weight:600">${badge}${cur}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
         <span class="l2 num">前日終値 ${pc==null?"—":sym+fmt(pc, u?2:1)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:12px">
         <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
-        <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div></div>`;
+        <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div>${extNote}</div>`;
   }).join("") || `<div class="row"><div class="l2">保有株はありません。「入力」から登録できます。</div></div>`;
   $("hNikkei").textContent = S.prices.nikkei? `NIKKEI ${fmt(S.prices.nikkei,0)}` : "";
   $("hSp").textContent = S.prices.sp500? `S&P500 ${fmt(S.prices.sp500,0)}` : "";
@@ -414,7 +419,8 @@ function openDetail(id){
   const p = priceOf(t), pl = plOf(t), u = USD(t.account);
   $("dName").textContent = t.name??t.code;
   $("dCode").textContent = `${t.code} ・ ${t.account}`;
-  $("dPrice").textContent = p==null? "—" : (u? "$"+fmt(p) : "¥"+fmt(p,1));
+  const sess = S.prices.session ? S.prices.session[String(t.code)] : null;
+  $("dPrice").innerHTML = (sess?`<span class="ext">時間外</span>`:"") + (p==null? "—" : (u? "$"+fmt(p) : "¥"+fmt(p,1)));
   if(pl!=null && t.entryPrice){
     const pct=(p/t.entryPrice-1)*100;
     $("dPl").textContent = `${sign(pl)} 円(${(pct>=0?"+":"−")+Math.abs(pct).toFixed(1)}%)`;
@@ -427,6 +433,7 @@ function openDetail(id){
   const dvTxt = dv==null ? "—"
     : `<span class="${cls(dv)}">${(dv>=0?"+":"−")+fmt(Math.abs(dv), u?2:1)} (${(dv>=0?"+":"−")+Math.abs(dv/pc*100).toFixed(2)}%)</span>`;
   $("dTable").innerHTML = [
+    ...(sess && sess.regular!=null ? [["通常取引終値", (u?"$":"¥")+fmt(sess.regular, u?2:1)+`(${sess.phase==="pre"?"プレ":"アフター"}マーケット中)`]] : []),
     ["前日終値", pc==null? "—" : (u?"$":"¥")+fmt(pc, u?2:1)],
     ["前日差", dvTxt],
     ["取得日", t.entryDate],
