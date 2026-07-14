@@ -234,9 +234,21 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
         <button class="ghost" onclick="exportHistoryCsv()">損益履歴を書き出し</button>
         <button class="ghost" onclick="$('impHist').click()">損益履歴を取り込み</button>
       </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportClosesCsv()">銘柄終値を書き出し</button>
+        <button class="ghost" onclick="$('impCloses').click()">銘柄終値を取り込み</button>
+      </div>
       <input type="file" id="impTrades" accept=".csv,text/csv" class="hidden" onchange="importTradesCsv(this)">
       <input type="file" id="impHist" accept=".csv,text/csv" class="hidden" onchange="importHistoryCsv(this)">
+      <input type="file" id="impCloses" accept=".csv,text/csv" class="hidden" onchange="importClosesCsv(this)">
       <p class="note" style="margin:10px 0 0">書き出しと取り込みは同一形式(編集可能なCSV・UTF-8)。取り込みは既存データを丸ごと置き換えます。事前に書き出して控えを残すことをおすすめします。</p>
+    </div>
+    <h2>終値の再取得</h2>
+    <div class="card">
+      <label>この日以降の銘柄終値をYahoo Financeから取り直して上書き</label>
+      <input type="date" id="refetchFrom">
+      <div style="margin-top:10px"><button class="ghost" id="refetchBtn" onclick="refetchCloses()">再取得を実行</button></div>
+      <p class="note" style="margin:8px 0 0">配当調整なしの実際の終値で揃え直します(2〜5分)。細かな手直しは上の「銘柄終値」CSVで行えます。</p>
     </div>
     <h2>その他</h2>
     <div class="card">
@@ -258,7 +270,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -909,6 +921,83 @@ async function importTradesCsv(input){
     toast(`トレード${out.length}件を取り込みました。次回更新で株価が反映されます`);
     show("home");
   }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 銘柄終値 (date,code,close / 取り込みは上書きマージ) ---- */
+const CLOSE_COLS = ["date","code","close"];
+async function shaOfData(name){
+  const r = await gh(`/repos/${S.owner}/${S.repo}/contents/data?ref=main&t=${Date.now()}`);
+  if(!r.ok) throw new Error("一覧取得失敗 ("+r.status+")");
+  const j = await r.json();
+  const f = j.find(x=>x.name===name);
+  if(!f) throw new Error(name+" が見つかりません");
+  return f.sha;
+}
+async function exportClosesCsv(){
+  await ensureStockPrices();
+  const by = S.stockPrices.byDate || {};
+  const rows = [];
+  Object.keys(by).sort().forEach(d=>{
+    Object.keys(by[d]).sort().forEach(c=>rows.push({date:d, code:c, close:by[d][c]}));
+  });
+  if(!rows.length) return toast("終値の記録がまだありません(先に「↻ 最新に更新」を実行してください)");
+  downloadCsv(toCsv(rows, CLOSE_COLS), "closes_export.csv");
+  toast(`終値${rows.length}件(${Object.keys(by).length}日分)を書き出しました`);
+}
+async function importClosesCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input));
+    input.value = "";
+    const head = rows.shift();
+    if(!head || head.join(",") !== CLOSE_COLS.join(","))
+      return toast("列名が形式と一致しません(date,code,close)");
+    await ensureStockPrices();
+    const errs = []; const recs = [];
+    rows.forEach((r,i)=>{
+      const [d, code, close] = [r[0]??"", (r[1]??"").trim(), numOr(r[2])];
+      const line = i+2;
+      if(!isDate(d)) return errs.push(`${line}行目: date が YYYY-MM-DD ではありません`);
+      if(!code) return errs.push(`${line}行目: code が空`);
+      if(!(close>0)) return errs.push(`${line}行目: close が正の数ではありません`);
+      recs.push([d, code, close]);
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!recs.length) return toast("有効な行がありません");
+    if(!confirm(`CSVの${recs.length}件を終値記録に反映します(該当する日付×銘柄のみ上書き、他はそのまま)。よろしいですか?`)) return;
+    const by = S.stockPrices.byDate = S.stockPrices.byDate || {};
+    recs.forEach(([d,c,v])=>{ (by[d] = by[d]||{})[c] = v; });
+    S.shas["stock_prices.json"] = await shaOfData("stock_prices.json");
+    await putFile("stock_prices.json", S.stockPrices, "import closes csv");
+    toast(`終値${recs.length}件を反映しました`);
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+async function refetchCloses(){
+  const from = $("refetchFrom").value;
+  if(!from) return toast("開始日を選んでください");
+  if(!confirm(`${from} 以降の銘柄終値をYahoo Financeから取り直して上書きします。よろしいですか?`)) return;
+  const btn = $("refetchBtn");
+  btn.disabled = true; btn.textContent = "再取得中…";
+  try{
+    const before = S.prices.updatedAt;
+    const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/update.yml/dispatches`,
+      { method:"POST", body: JSON.stringify({ref:"main", inputs:{refetch_from: from}}) });
+    if(!r.ok) throw new Error("起動失敗 ("+r.status+")");
+    toast("再取得を開始しました(2〜5分かかります)");
+    for(let i=0;i<20;i++){
+      await new Promise(s=>setTimeout(s,15000));
+      try{
+        const p = await getFile("prices.json");
+        if(p.updatedAt !== before){
+          S.prices = p; S.stockPrices = null;   // 次回表示時に再読込
+          toast("終値の再取得が完了しました");
+          btn.disabled=false; btn.textContent="再取得を実行"; return;
+        }
+      }catch(e){}
+      btn.textContent = "再取得中… "+(i+1)*15+"秒";
+    }
+    toast("時間内に完了を確認できませんでした。Actionsのログをご確認ください");
+  }catch(e){ toast("再取得に失敗: "+e.message); }
+  btn.disabled=false; btn.textContent="再取得を実行";
 }
 
 /* ---- 損益履歴 ---- */
