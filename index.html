@@ -224,10 +224,23 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div style="margin-top:10px"><button class="ghost" id="masterBtn" onclick="updateMaster()">最新の銘柄情報に更新</button></div>
       <p class="note" style="margin:8px 0 0">JPX(東証)とNASDAQ公式の上場銘柄一覧を取得してマスターを最新化します(1〜2分)。毎月2日にも自動更新されます。</p>
     </div>
-    <h2>データ</h2>
+    <h2>データ(CSVエクスポート / 一括インポート)</h2>
     <div class="card">
-      <button class="ghost" onclick="exportCsv()">全トレードをCSVでエクスポート</button>
-      <div style="margin-top:8px"><button class="ghost" onclick="lockApp()">ロックする(パスワード再入力)</button></div>
+      <div class="grid2">
+        <button class="ghost" onclick="exportTradesCsv()">トレードを書き出し</button>
+        <button class="ghost" onclick="$('impTrades').click()">トレードを取り込み</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportHistoryCsv()">損益履歴を書き出し</button>
+        <button class="ghost" onclick="$('impHist').click()">損益履歴を取り込み</button>
+      </div>
+      <input type="file" id="impTrades" accept=".csv,text/csv" class="hidden" onchange="importTradesCsv(this)">
+      <input type="file" id="impHist" accept=".csv,text/csv" class="hidden" onchange="importHistoryCsv(this)">
+      <p class="note" style="margin:10px 0 0">書き出しと取り込みは同一形式(編集可能なCSV・UTF-8)。取り込みは既存データを丸ごと置き換えます。事前に書き出して控えを残すことをおすすめします。</p>
+    </div>
+    <h2>その他</h2>
+    <div class="card">
+      <div><button class="ghost" onclick="lockApp()">ロックする(パスワード再入力)</button></div>
       <div style="margin-top:8px"><button class="ghost danger" onclick="resetAll()">接続設定を消去(データは消えません)</button></div>
     </div>
     <p class="note" id="verNote"><span id="verNote2"></span>データはGitHub非公開リポジトリに保存されています。トークンはパスワードで暗号化されこの端末内にのみ保存されます。</p>
@@ -245,7 +258,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -822,13 +835,117 @@ async function saveSettings(){
   try{ await putFile("settings.json", S.settings, "update settings"); toast("保存しました"); }
   catch(e){ toast("保存に失敗: "+e.message); }
 }
-function exportCsv(){
-  const head="id,entryDate,exitDate,code,name,account,score,entryPrice,exitPrice,qty,pl_jpy";
-  const rows = S.trades.trades.map(t=>[t.id,t.entryDate,t.exitDate??"",t.code,`"${t.name??""}"`,
-    t.account,t.score??"",t.entryPrice,t.exitPrice??"",t.qty, plOf(t)==null?"":Math.round(plOf(t))].join(","));
-  const blob = new Blob(["\uFEFF"+head+"\n"+rows.join("\n")],{type:"text/csv"});
+/* ---- CSV 共通 ---- */
+const TRADE_COLS = ["id","entryDate","exitDate","code","name","account","score","entryPrice","exitPrice","qty"];
+const HIST_COLS  = ["date","fx","evaluation","cashJpy","cashUsd","totalAssets","invested","capitalGain","nikkei","sp500","nasdaq","dow"];
+function csvEscape(v){ v = v==null? "" : String(v); return /[",\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function toCsv(rows, cols){
+  return "\uFEFF"+cols.join(",")+"\n"+rows.map(r=>cols.map(c=>csvEscape(r[c])).join(",")).join("\n");
+}
+function downloadCsv(text, name){
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "株式売買実績_export.csv"; a.click();
+  a.href = URL.createObjectURL(new Blob([text],{type:"text/csv;charset=utf-8"}));
+  a.download = name; a.click();
+}
+function parseCsv(text){
+  text = text.replace(/^\uFEFF/,"");
+  const rows=[]; let row=[], cur="", q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; }
+      else cur+=ch;
+    } else if(ch==='"') q=true;
+    else if(ch===','){ row.push(cur); cur=""; }
+    else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&text[i+1]==='\n') i++; row.push(cur); rows.push(row); row=[]; cur=""; }
+    else cur+=ch;
+  }
+  if(cur!==""||row.length){ row.push(cur); rows.push(row); }
+  return rows.filter(r=>r.some(v=>v!==""));
+}
+const numOr = v => (v===""||v==null) ? null : (isFinite(+v)? +v : NaN);
+const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+function readFile(input){
+  return new Promise((res,rej)=>{
+    const f = input.files[0]; if(!f) return rej(new Error("ファイル未選択"));
+    const r = new FileReader();
+    r.onload = ()=>res(r.result); r.onerror = ()=>rej(new Error("読み込み失敗"));
+    r.readAsText(f, "utf-8");
+  });
+}
+
+/* ---- トレード ---- */
+function exportTradesCsv(){
+  downloadCsv(toCsv(S.trades.trades, TRADE_COLS), "trades_export.csv");
+  toast(`トレード${S.trades.trades.length}件を書き出しました`);
+}
+async function importTradesCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input));
+    input.value = "";
+    const head = rows.shift();
+    if(!head || head.join(",") !== TRADE_COLS.join(","))
+      return toast("列名が形式と一致しません。書き出したCSVと同じ列でお願いします");
+    const out = []; const errs = [];
+    rows.forEach((r,i)=>{
+      const o = {}; TRADE_COLS.forEach((c,j)=>o[c]=r[j]??"");
+      const line = i+2;
+      if(!isDate(o.entryDate)) return errs.push(`${line}行目: entryDate が YYYY-MM-DD ではありません`);
+      if(o.exitDate!=="" && !isDate(o.exitDate)) return errs.push(`${line}行目: exitDate が不正`);
+      const qty = numOr(o.qty), ep = numOr(o.entryPrice), xp = numOr(o.exitPrice), sc = numOr(o.score);
+      if(!o.code) return errs.push(`${line}行目: code が空`);
+      if(!(qty>0) || !(ep>0)) return errs.push(`${line}行目: qty / entryPrice が不正`);
+      if(o.exitDate!=="" && !(xp>0)) return errs.push(`${line}行目: exit済みなのに exitPrice が不正`);
+      out.push({ id:0, entryDate:o.entryDate, exitDate:o.exitDate||null, code:String(o.code).trim(),
+        name:o.name||String(o.code), account:o.account||"SBI日", score:(sc===null||isNaN(sc))?null:sc,
+        entryPrice:ep, exitPrice:o.exitDate?xp:null, qty:qty });
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!out.length) return toast("有効な行がありません");
+    out.sort((a,b)=>a.entryDate<b.entryDate?-1:1).forEach((t,i)=>t.id=i+1);
+    if(!confirm(`現在のトレード${S.trades.trades.length}件を、CSVの${out.length}件で置き換えます。よろしいですか?`)) return;
+    S.trades.trades = out;
+    await saveTrades("import trades csv");
+    toast(`トレード${out.length}件を取り込みました。次回更新で株価が反映されます`);
+    show("home");
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 損益履歴 ---- */
+function exportHistoryCsv(){
+  downloadCsv(toCsv(S.history.history, HIST_COLS), "history_export.csv");
+  toast(`損益履歴${S.history.history.length}行を書き出しました`);
+}
+async function importHistoryCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input));
+    input.value = "";
+    const head = rows.shift();
+    if(!head || head.join(",") !== HIST_COLS.join(","))
+      return toast("列名が形式と一致しません。書き出したCSVと同じ列でお願いします");
+    const out = []; const errs = []; const seen = new Set();
+    rows.forEach((r,i)=>{
+      const o = {}; HIST_COLS.forEach((c,j)=>o[c]=r[j]??"");
+      const line = i+2;
+      if(!isDate(o.date)) return errs.push(`${line}行目: date が YYYY-MM-DD ではありません`);
+      if(seen.has(o.date)) return errs.push(`${line}行目: date が重複(${o.date})`);
+      seen.add(o.date);
+      const rec = { date:o.date };
+      for(const c of HIST_COLS.slice(1)){
+        const v = numOr(o[c]);
+        if(v!==null && isNaN(v)) return errs.push(`${line}行目: ${c} が数値ではありません`);
+        rec[c] = v;
+      }
+      out.push(rec);
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!out.length) return toast("有効な行がありません");
+    out.sort((a,b)=>a.date<b.date?-1:1);
+    if(!confirm(`現在の損益履歴${S.history.history.length}行を、CSVの${out.length}行で置き換えます。よろしいですか?`)) return;
+    S.history.history = out;
+    await putFile("history.json", S.history, "import history csv");
+    toast(`損益履歴${out.length}行を取り込みました`);
+  }catch(e){ toast("取り込み失敗: "+e.message); }
 }
 function lockApp(){ sessionStorage.removeItem("kabu_tok"); location.reload(); }
 function resetAll(){
