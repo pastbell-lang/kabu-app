@@ -110,6 +110,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   <div class="meta"><span id="metaLeft">—</span><span id="metaRight"></span></div>
 
   <section id="scr-home" class="screen on">
+    <p class="note num" id="verLine" style="margin:0 2px 8px;text-align:right"></p>
     <div class="cards">
       <div class="card"><div class="lbl">投資評価額</div><div class="val num" id="hEval">—</div><div class="s num" id="hEvalPl"></div></div>
       <div class="card"><div class="lbl">前日差</div><div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
@@ -211,7 +212,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div style="margin-top:8px"><button class="ghost" onclick="lockApp()">ロックする(パスワード再入力)</button></div>
       <div style="margin-top:8px"><button class="ghost danger" onclick="resetAll()">接続設定を消去(データは消えません)</button></div>
     </div>
-    <p class="note" id="verNote">アプリ v1.0 ・ データはGitHub非公開リポジトリに保存されています。トークンはパスワードで暗号化されこの端末内にのみ保存されます。</p>
+    <p class="note" id="verNote"><span id="verNote2"></span>データはGitHub非公開リポジトリに保存されています。トークンはパスワードで暗号化されこの端末内にのみ保存されます。</p>
   </section>
 </main>
 
@@ -226,6 +227,8 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
+const APP_VERSION = "1.7";
+const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
             shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日" };
@@ -776,6 +779,8 @@ $("unlockBtn").onclick = async ()=>{
 };
 $("resetCfg").onclick = resetAll;
 $("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("unlockBtn").click(); });
+document.getElementById("verLine").textContent = `アプリ v${APP_VERSION}(${APP_DATE.replace(/-/g,"/")} 更新)`;
+document.getElementById("verNote2").textContent = `アプリ v${APP_VERSION}(${APP_DATE} 更新)・ `;
 resetInputForm();
 boot();
 </script>
