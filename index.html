@@ -393,10 +393,11 @@ function renderHome(){
         <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span></span>
         <span class="p num" style="font-weight:600">${cur}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
-        <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span></div>
+        <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
+        <span class="l2 num">前日終値 ${pc==null?"—":sym+fmt(pc, u?2:1)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:12px">
-        <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span>
-        <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span></div></div>`;
+        <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
+        <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div></div>`;
   }).join("") || `<div class="row"><div class="l2">保有株はありません。「入力」から登録できます。</div></div>`;
   $("hNikkei").textContent = S.prices.nikkei? `NIKKEI ${fmt(S.prices.nikkei,0)}` : "";
   $("hSp").textContent = S.prices.sp500? `S&P500 ${fmt(S.prices.sp500,0)}` : "";
