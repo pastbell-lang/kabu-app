@@ -107,10 +107,12 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   <button id="refreshBtn" onclick="doRefresh()">↻ 最新に更新</button>
 </header>
 <main>
+  <p class="note num" id="verLine" style="margin:0 2px 6px;text-align:left"></p>
   <div class="meta"><span id="metaLeft">—</span><span id="metaRight"></span></div>
 
   <section id="scr-home" class="screen on">
-    <p class="note num" id="verLine" style="margin:0 2px 8px;text-align:left"></p>
+    <h2 style="margin-top:2px">市場</h2>
+    <div class="cards" id="idxCards"></div>
     <div class="cards">
       <div class="card"><div class="lbl">投資評価額</div><div class="val num" id="hEval">—</div><div class="s num" id="hEvalPl"></div></div>
       <div class="card"><div class="lbl">前日差</div><div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
@@ -119,7 +121,6 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
     </div>
-    <div class="cards" id="idxCards"></div>
     <h2 id="hHoldTitle">保有株</h2>
     <div class="list" id="holdList"></div>
   </section>
@@ -227,7 +228,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -421,7 +422,8 @@ function renderHome(){
       const d = assetsNow - base.totalAssets;
       $(idV).textContent = sign(d); $(idV).className = "val num "+cls(d);
       $(idP).textContent = `${base.date.slice(2)}比 ${(d>=0?"+":"−")+Math.abs(d/base.totalAssets*100).toFixed(2)}%`;
-    } else { $(idV).textContent="—"; $(idP).textContent="基準データなし"; }
+      $(idP).className = "s num "+cls(d);
+    } else { $(idV).textContent="—"; $(idP).textContent="基準データなし"; $(idP).className="s num"; }
   };
   setDiff("hDiff","hDiffPct", lastBefore(today));
   setDiff("hMDiff","hMDiffPct", lastBefore(today.slice(0,7)+"-01"));            // 前月末
