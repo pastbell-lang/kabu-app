@@ -192,8 +192,21 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     <h2>資産・指数の相対推移(起点=100)</h2>
     <canvas id="chart" width="1040" height="400"></canvas>
     <div id="chartLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 2px 0;font-size:11px;color:var(--sub)"></div>
-    <h2>損益履歴</h2>
+    <h2>損益履歴(月別)</h2>
     <div class="list" id="histList"></div>
+  </section>
+
+  <section id="scr-histday" class="screen">
+    <button class="back" onclick="show('history')">‹ 月別一覧</button>
+    <h2 id="hdTitle"></h2>
+    <div class="list" id="hdList"></div>
+  </section>
+
+  <section id="scr-histstock" class="screen">
+    <button class="back" id="hsBack">‹ 日別一覧</button>
+    <h2 id="hsTitle"></h2>
+    <div id="hsBody"></div>
+    <p class="note">株価はその日時点の記録(米国株はその朝時点の直近終値)。損益はその日の記録為替で円換算。</p>
   </section>
 
   <section id="scr-settings" class="screen">
@@ -232,7 +245,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "1.11";
+const APP_VERSION = "2.0";
 const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -690,14 +703,82 @@ function renderHistory(){
     $("chartLegend").innerHTML = series.map(s0=>
       `<span><span style="display:inline-block;width:14px;height:3px;background:${s0.color};vertical-align:middle;margin-right:4px"></span>${s0.label}</span>`).join("");
   }
-  $("histList").innerHTML = [...h].reverse().slice(0,40).map((r,i,arr)=>{
-    const prev = arr[i+1];
-    const d = prev&&r.totalAssets!=null&&prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
-    return `<div class="row"><div><div class="l1 num" style="font-size:14px">${r.date}</div>
+  // 月別一覧: 各月の最終記録行(進行中の月は最新行)を月末時点として表示
+  const byMonth = new Map();
+  h.forEach(r=>byMonth.set(r.date.slice(0,7), r));   // 昇順なので後勝ち=月末
+  const months = [...byMonth.keys()].sort().reverse();
+  $("histList").innerHTML = months.map((m,i)=>{
+    const r = byMonth.get(m), prev = byMonth.get(months[i+1]);
+    const d = prev && r.totalAssets!=null && prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
+    return `<div class="row" onclick="openHistMonth('${m}')"><div><div class="l1 num">${m.replace("-","/")}</div>
+      <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
+      <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
+      <div class="pct num ${d==null?"":cls(d)}">${d==null?"月損益 —":"月損益 "+sign(d)}</div></div></div>`;
+  }).join("");
+}
+
+function openHistMonth(m){
+  S.histMonth = m;
+  const h = S.history.history;
+  const rows = h.map((r,i)=>[r,i]).filter(([r])=>r.date.slice(0,7)===m).reverse();
+  $("hdTitle").textContent = `${m.replace("-","/")} の損益履歴(${rows.length}日)`;
+  $("hdList").innerHTML = rows.map(([r,i])=>{
+    const prev = h[i-1];
+    const d = prev && r.totalAssets!=null && prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
+    return `<div class="row" onclick="openHistDay('${r.date}')"><div><div class="l1 num" style="font-size:14px">${r.date}</div>
       <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
       <div class="pct num ${d==null?"":cls(d)}">${d==null?"":sign(d)}</div></div></div>`;
   }).join("");
+  show("histday");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="history"));
+}
+
+async function ensureStockPrices(){
+  if(S.stockPrices) return;
+  try{ S.stockPrices = await getRaw("stock_prices.json"); }
+  catch(e){ S.stockPrices = {byDate:{}}; }
+}
+function heldOn(d){
+  return S.trades.trades.filter(t=>t.entryDate && t.entryDate<=d && (!t.exitDate || t.exitDate>d));
+}
+async function openHistDay(d){
+  await ensureStockPrices();
+  const by = S.stockPrices.byDate || {};
+  const map = by[d] || {};
+  const prevD = Object.keys(by).sort().reverse().find(x=>x<d);
+  const pmap = prevD ? by[prevD] : {};
+  const hrow = S.history.history.find(r=>r.date===d);
+  const fx = (hrow && hrow.fx) || S.prices.usdjpy;
+  const hold = heldOn(d);
+  const row = t=>{
+    const u = USD(t.account), sym = u?"$":"¥";
+    const p = map[String(t.code)] ?? null, pc = pmap[String(t.code)] ?? null;
+    const pl = (p!=null && t.entryPrice!=null && t.qty) ? (p-t.entryPrice)*t.qty*(u?fx:1) : null;
+    const pct = (p!=null && t.entryPrice) ? (p/t.entryPrice-1)*100 : null;
+    const dv = (p!=null && pc) ? p-pc : null;
+    const plTxt = pl==null ? "損益 —" : `損益 ${sign(pl)} (${(pct>=0?"+":"−")+Math.abs(pct).toFixed(1)}%)`;
+    const dTxt = dv==null ? "前日 —" : `前日 ${(dv>=0?"+":"−")+fmt(Math.abs(dv), u?2:1)} (${(dv>=0?"+":"−")+Math.abs(dv/pc*100).toFixed(2)}%)`;
+    return `<div class="row" style="display:block">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span></span>
+        <span class="p num" style="font-weight:600">${p==null?"—":sym+fmt(p, u?2:1)}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:3px">
+        <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
+        <span class="l2 num">前日終値 ${pc==null?"—":sym+fmt(pc, u?2:1)}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:12px">
+        <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
+        <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div></div>`;
+  };
+  const jp = hold.filter(t=>!USD(t.account)), us = hold.filter(t=>USD(t.account));
+  const empty = `<div class="row"><div class="l2">該当なし</div></div>`;
+  $("hsTitle").textContent = `${d} の保有銘柄(${hold.length})`;
+  $("hsBody").innerHTML =
+    `<h2>日本株(${jp.length}銘柄)</h2><div class="list">${jp.map(row).join("")||empty}</div>` +
+    `<h2 style="margin-top:14px">米国株(${us.length}銘柄)</h2><div class="list">${us.map(row).join("")||empty}</div>`;
+  $("hsBack").onclick = ()=>openHistMonth(S.histMonth);
+  show("histstock");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="history"));
 }
 
 /* ================= 設定 ================= */
