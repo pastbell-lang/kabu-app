@@ -68,6 +68,10 @@ table.kv td:last-child{text-align:right}
 .note{font-size:11px;color:var(--sub);margin:10px 2px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom));
   background:var(--ink);color:#fff;font-size:13px;padding:10px 18px;border-radius:20px;opacity:0;transition:opacity .25s;z-index:50;pointer-events:none;max-width:88%}
+.sug{border:0.5px solid var(--line);border-radius:10px;margin-top:6px;overflow:hidden;background:var(--card)}
+.sug div{padding:10px 12px;font-size:14px;border-bottom:0.5px solid var(--line);display:flex;justify-content:space-between;gap:10px}
+.sug div:last-child{border-bottom:none}
+.sug .c{color:var(--sub);font-size:12px;flex-shrink:0}
 .ext{font-size:10px;font-weight:500;color:#8A63D2;border:1px solid #8A63D2;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
 .toast.show{opacity:.95}
 #lock{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
@@ -158,10 +162,11 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   </section>
 
   <section id="scr-input" class="screen">
-    <h2 id="inTitle">銘柄を登録</h2>
+    <h2 id="inTitle">銘柄登録</h2>
     <div class="card">
-      <label>コード</label><input id="inCode" autocapitalize="characters" autocomplete="off" placeholder="8267 / SOXL">
-      <label>銘柄名</label><input id="inName" autocomplete="off" placeholder="イオン">
+      <label>コード(入力すると銘柄名を自動表示)</label><input id="inCode" autocapitalize="characters" autocomplete="off" placeholder="8267 / SOXL">
+      <label>銘柄名(入力すると候補から検索できます)</label><input id="inName" autocomplete="off" placeholder="イオン">
+      <div id="sug" class="sug hidden"></div>
       <label>口座</label>
       <div class="seg" id="inAcct">
         <button data-v="SBI日" class="on">SBI日</button><button data-v="SBI米">SBI米</button><button data-v="moomoo">moomoo</button>
@@ -193,6 +198,12 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
         <div><label>余力 $</label><input type="number" inputmode="decimal" step="any" id="setCashUsd"></div>
       </div>
       <div style="margin-top:14px"><button class="primary" onclick="saveSettings()">保存する</button></div>
+    </div>
+    <h2>銘柄マスター</h2>
+    <div class="card">
+      <p class="l2" id="masterInfo" style="font-size:13px;color:var(--sub)">—</p>
+      <div style="margin-top:10px"><button class="ghost" id="masterBtn" onclick="updateMaster()">最新の銘柄情報に更新</button></div>
+      <p class="note" style="margin:8px 0 0">JPX(東証)とNASDAQ公式の上場銘柄一覧を取得してマスターを最新化します(1〜2分)。毎月2日にも自動更新されます。</p>
     </div>
     <h2>データ</h2>
     <div class="card">
@@ -313,6 +324,48 @@ function marginalRate(rr, win){
   return v==null ? null : v;
 }
 
+/* ================= 銘柄マスター・検索 ================= */
+async function getRaw(name){   // 大きいファイル用(生コンテンツ取得)
+  const r = await gh(`/repos/${S.owner}/${S.repo}/contents/data/${name}?ref=main&t=${Date.now()}`,
+                     { headers: { "Accept": "application/vnd.github.raw+json" } });
+  if(!r.ok) throw new Error(`${name} 読込失敗 (${r.status})`);
+  return JSON.parse(await r.text());
+}
+async function ensureMaster(){
+  if(S.master) return;
+  try{ S.master = await getRaw("master.json"); }
+  catch(e){ S.master = {jp:[],us:[],updatedAt:null}; }
+}
+function masterList(){ return USD(S.acct) ? (S.master?.us||[]) : (S.master?.jp||[]); }
+function hideSug(){ $("sug").classList.add("hidden"); $("sug").innerHTML=""; }
+function showSug(items){
+  if(!items.length) return hideSug();
+  $("sug").innerHTML = items.slice(0,8).map(([c,n])=>
+    `<div onclick="pickSug('${c.replace(/'/g,"")}')"><span>${n}</span><span class="c num">${c}</span></div>`).join("");
+  $("sug").classList.remove("hidden");
+}
+function pickSug(code){
+  const hit = masterList().find(([c])=>c===code);
+  if(hit){ $("inCode").value = hit[0]; $("inName").value = hit[1]; }
+  hideSug();
+}
+function onCodeInput(){
+  const v = $("inCode").value.trim().toUpperCase();
+  if(!v) return hideSug();
+  const list = masterList();
+  const exact = list.find(([c])=>c===v);
+  if(exact){ $("inName").value = exact[1]; hideSug(); return; }
+  showSug(list.filter(([c])=>c.startsWith(v)));
+}
+function onNameInput(){
+  const v = $("inName").value.trim();
+  if(!v) return hideSug();
+  const lo = v.toLowerCase();
+  showSug(masterList().filter(([c,n])=>n.toLowerCase().includes(lo)));
+}
+$("inCode").addEventListener("input", onCodeInput);
+$("inName").addEventListener("input", onNameInput);
+
 /* ================= 画面制御 ================= */
 function show(name){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));
@@ -325,7 +378,7 @@ function show(name){
   if(name==="settings") renderSettings();
 }
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{ 
-  if(b.dataset.s==="input" && S.editingId==null) resetInputForm();
+  if(b.dataset.s==="input"){ if(S.editingId==null) resetInputForm(); ensureMaster(); }
   show(b.dataset.s);
 });
 $("inAcct").querySelectorAll("button").forEach(b=>b.onclick=()=>{
@@ -333,6 +386,7 @@ $("inAcct").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   $("inAcct").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
   $("inUnit").textContent = USD(S.acct) ? "($)" : "(円)";
   if(S.editingId==null) $("inDate").value = bizDate(S.acct);   // 米国株は6時まで前日扱い
+  hideSug();
 });
 
 /* ================= ホーム ================= */
@@ -485,11 +539,12 @@ async function delTrade(){
 /* ================= 入力 ================= */
 function resetInputForm(){
   S.editingId=null;
-  $("inTitle").textContent="銘柄を登録";
+  $("inTitle").textContent="銘柄登録";
   ["inCode","inName","inQty","inPrice","inScore"].forEach(i=>$(i).value="");
   $("inDate").value = bizDate(S.acct);
   $("inSave").textContent="登録する";
   $("inCancelWrap").classList.add("hidden");
+  if(typeof hideSug==="function") hideSug();
 }
 function cancelEdit(){ resetInputForm(); openDetail(S.detailId); }
 async function saveTrade(){
@@ -593,6 +648,36 @@ function renderHistory(){
 function renderSettings(){
   $("setCashJpy").value = S.settings.cashJpy??0;
   $("setCashUsd").value = S.settings.cashUsd??0;
+  ensureMaster().then(()=>{
+    const m = S.master||{};
+    $("masterInfo").textContent =
+      `日本株 ${(m.jp||[]).length}銘柄 / 米国株 ${(m.us||[]).length}銘柄 ・ 最終更新 ${m.updatedAt? String(m.updatedAt).slice(0,16).replace("T"," ") : "—"}`;
+  });
+}
+async function updateMaster(){
+  const btn = $("masterBtn");
+  btn.disabled = true; btn.textContent = "更新中…";
+  try{
+    const before = S.master?.updatedAt;
+    const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/master.yml/dispatches`,
+      { method:"POST", body: JSON.stringify({ref:"main"}) });
+    if(!r.ok) throw new Error("起動失敗 ("+r.status+")");
+    toast("銘柄情報を取得しています(1〜2分かかります)");
+    for(let i=0;i<12;i++){
+      await new Promise(s=>setTimeout(s,15000));
+      try{
+        const m = await getRaw("master.json");
+        if(m.updatedAt !== before){
+          S.master = m; renderSettings();
+          toast(`銘柄マスターを更新しました(日本株${m.jp.length} / 米国株${m.us.length})`);
+          btn.disabled=false; btn.textContent="最新の銘柄情報に更新"; return;
+        }
+      }catch(e){}
+      btn.textContent = "更新中… "+(i+1)*15+"秒";
+    }
+    toast("時間内に完了しませんでした。しばらくして設定画面を開き直してください");
+  }catch(e){ toast("更新に失敗: "+e.message); }
+  btn.disabled=false; btn.textContent="最新の銘柄情報に更新";
 }
 async function saveSettings(){
   S.settings.cashJpy = parseFloat($("setCashJpy").value)||0;
