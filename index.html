@@ -113,6 +113,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   <section id="scr-home" class="screen on">
     <h2 style="margin-top:2px">市場</h2>
     <div class="cards" id="idxCards"></div>
+    <h2>評価</h2>
     <div class="cards">
       <div class="card"><div class="lbl">投資評価額</div><div class="val num" id="hEval">—</div><div class="s num" id="hEvalPl"></div></div>
       <div class="card"><div class="lbl">前日差</div><div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
@@ -121,8 +122,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
     </div>
-    <h2 id="hHoldTitle">保有株</h2>
-    <div class="list" id="holdList"></div>
+    <h2 id="hTitleJp">保有株(日本株)</h2>
+    <div class="list" id="holdListJp"></div>
+    <h2 id="hTitleUs" style="margin-top:14px">保有株(米国株)</h2>
+    <div class="list" id="holdListUs"></div>
   </section>
 
   <section id="scr-detail" class="screen">
@@ -228,7 +231,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "1.9";
+const APP_VERSION = "1.10";
 const APP_DATE = "2026-07-14";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -439,8 +442,7 @@ function renderHome(){
   });
   const gain = realized + (S.settings.capitalGainOffset||0);
   $("hGain").textContent = yen(gain); $("hGain").className="val num "+cls(gain);
-  $("hHoldTitle").textContent = `保有株(${open.length}銘柄)`;
-  $("holdList").innerHTML = open.map(t=>{
+  const rowHtml = t => {
     const u = USD(t.account), sym = u? "$" : "¥";
     const p = priceOf(t), pl = plOf(t);
     const pct = (p!=null && t.entryPrice) ? (p/t.entryPrice-1)*100 : null;
@@ -466,7 +468,13 @@ function renderHome(){
       <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:12px">
         <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
         <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div>${extNote}</div>`;
-  }).join("") || `<div class="row"><div class="l2">保有株はありません。「入力」から登録できます。</div></div>`;
+  };
+  const jp = open.filter(t=>!USD(t.account)), us = open.filter(t=>USD(t.account));
+  const empty = `<div class="row"><div class="l2">保有株はありません。「入力」から登録できます。</div></div>`;
+  $("hTitleJp").textContent = `保有株・日本株(${jp.length}銘柄)`;
+  $("holdListJp").innerHTML = jp.map(rowHtml).join("") || empty;
+  $("hTitleUs").textContent = `保有株・米国株(${us.length}銘柄)`;
+  $("holdListUs").innerHTML = us.map(rowHtml).join("") || empty;
   // 指数カード(前日差額と前日比は履歴の前営業日基準)
   const idxPrev = [...hist].reverse().find(r=>r.date < today);
   const idxCard = (label, cur, prev, digits) => {
