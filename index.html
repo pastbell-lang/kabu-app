@@ -163,7 +163,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <label>銘柄名</label><input id="inName" autocomplete="off" placeholder="イオン">
       <label>口座</label>
       <div class="seg" id="inAcct">
-        <button data-v="SBI日" class="on">SBI日</button><button data-v="SBI米">SBI米</button><button data-v="Moo">Moo</button>
+        <button data-v="SBI日" class="on">SBI日</button><button data-v="SBI米">SBI米</button><button data-v="moomoo">moomoo</button>
       </div>
       <div class="grid2">
         <div><label>取得日</label><input type="date" id="inDate"></div>
@@ -218,7 +218,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
             shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日" };
 const $ = id => document.getElementById(id);
-const USD = a => a === "Moo" || a === "SBI米";
+const USD = a => a === "moomoo" || a === "Moo" || a === "SBI米";
+// 端末ローカル(日本時間)のYYYY-MM-DD。米国株(moomoo/SBI米)は朝6時までを前日として扱う
+const localDate = d => { const x = new Date(d.getTime() - d.getTimezoneOffset()*60000); return x.toISOString().slice(0,10); };
+const bizDate = a => { const d = new Date(); if(USD(a)) d.setHours(d.getHours()-6); return localDate(d); };
 const yen = v => "¥" + Math.round(v).toLocaleString("ja-JP");
 const fmt = (v,d=2) => (+v).toLocaleString("ja-JP",{maximumFractionDigits:d});
 const sign = v => (v>=0?"+":"−") + Math.abs(Math.round(v)).toLocaleString("ja-JP");
@@ -328,6 +331,7 @@ $("inAcct").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   S.acct=b.dataset.v;
   $("inAcct").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
   $("inUnit").textContent = USD(S.acct) ? "($)" : "(円)";
+  if(S.editingId==null) $("inDate").value = bizDate(S.acct);   // 米国株は6時まで前日扱い
 });
 
 /* ================= ホーム ================= */
@@ -349,7 +353,7 @@ function renderHome(){
   $("hEval").textContent = yen(ev);
   const pl = ev-inv;
   $("hEvalPl").textContent = `評価損益 ${sign(pl)}`; $("hEvalPl").className = "s num "+cls(pl);
-  const hist = S.history.history, today = new Date().toISOString().slice(0,10);
+  const hist = S.history.history, today = localDate(new Date());
   const cj = S.settings.cashJpy||0, cu = S.settings.cashUsd||0;
   const assetsNow = ev + cj + cu*fx;
   // 差分は投資可能資産(評価額+余力)基準: 株の売買による現金⇄株式の移動に影響されない純粋な損益差
@@ -435,7 +439,7 @@ function openDetail(id){
     ["点数", t.score??"—"],
   ].map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("");
   $("exUnit").textContent = u? "($)" : "(円)";
-  $("exDate").value = new Date().toISOString().slice(0,10);
+  $("exDate").value = bizDate(t.account);
   $("exPrice").value = p??"";
   show("detail");
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.s==="home"));
@@ -476,7 +480,7 @@ function resetInputForm(){
   S.editingId=null;
   $("inTitle").textContent="銘柄を登録";
   ["inCode","inName","inQty","inPrice","inScore"].forEach(i=>$(i).value="");
-  $("inDate").value = new Date().toISOString().slice(0,10);
+  $("inDate").value = bizDate(S.acct);
   $("inSave").textContent="登録する";
   $("inCancelWrap").classList.add("hidden");
 }
