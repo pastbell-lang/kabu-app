@@ -306,7 +306,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -320,6 +320,7 @@ const yen = v => "¥" + Math.round(v).toLocaleString("ja-JP");
 const fmt = (v,d=2) => (+v).toLocaleString("ja-JP",{maximumFractionDigits:d});
 const sign = v => (v>=0?"+":"−") + Math.abs(Math.round(v)).toLocaleString("ja-JP");
 const cls = v => v>=0 ? "pos" : "neg";
+const dispName = t => (t.name && t.name!==String(t.code)) ? `${t.code} ${t.name}` : String(t.code);
 function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2600); }
 
 /* ================= 暗号化 (PAT保管) ================= */
@@ -423,7 +424,7 @@ function hideSug(){ $("sug").classList.add("hidden"); $("sug").innerHTML=""; }
 function showSug(items){
   if(!items.length) return hideSug();
   $("sug").innerHTML = items.slice(0,8).map(([c,n])=>
-    `<div onclick="pickSug('${c.replace(/'/g,"")}')"><span>${n}</span><span class="c num">${c}</span></div>`).join("");
+    `<div onclick="pickSug('${c.replace(/'/g,"")}')"><span><span class="c num" style="margin-right:8px">${c}</span>${n}</span></div>`).join("");
   $("sug").classList.remove("hidden");
 }
 function pickSug(code){
@@ -544,7 +545,7 @@ function renderHome(){
       ? `<div class="l2 num" style="margin-top:3px;font-size:11px">通常取引終値 ${sym}${fmt(sess.regular, u?2:1)}(${sess.phase==="pre"?"プレマーケット":"アフターマーケット"}で${(p-sess.regular>=0?"+":"−")+sym+fmt(Math.abs(p-sess.regular), u?2:1)})</div>` : "";
     return `<div class="row" onclick="openDetail(${t.id})" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span>${(p!=null&&t.entryPrice&&p<t.entryPrice*0.95)?'<span class="lc">LC割れ</span>':''}</span>
+        <span class="l1">${dispName(t)}<span class="tag">${t.account}</span>${(p!=null&&t.entryPrice&&p<t.entryPrice*0.95)?'<span class="lc">LC割れ</span>':''}</span>
         <span class="p num" style="font-weight:600">${badge}${cur}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
@@ -591,8 +592,8 @@ async function openDetail(id){
   S.detailId = id;
   const t = S.trades.trades.find(x=>x.id===id); if(!t) return;
   const p = priceOf(t), pl = plOf(t), u = USD(t.account);
-  $("dName").textContent = t.name??t.code;
-  $("dCode").textContent = `${t.code} ・ ${t.account}`;
+  $("dName").textContent = dispName(t);
+  $("dCode").textContent = t.account;
   const sess = S.prices.session ? S.prices.session[String(t.code)] : null;
   $("dPrice").innerHTML = (sess?`<span class="ext">時間外</span>`:"") + (p==null? "—" : (u? "$"+fmt(p) : "¥"+fmt(p,1)));
   if(pl!=null && t.entryPrice){
@@ -630,7 +631,7 @@ async function doExit(){
   const t = S.trades.trades.find(x=>x.id===S.detailId);
   const d = $("exDate").value, p = parseFloat($("exPrice").value);
   if(!d || !(p>0)) return toast("売却日と売却単価を入力してください");
-  if(!confirm(`${t.name??t.code} を ${d} に ${p} で売却として確定します。よろしいですか?`)) return;
+  if(!confirm(`${dispName(t)} を ${d} に ${p} で売却として確定します。よろしいですか?`)) return;
   t.exitDate = d; t.exitPrice = p;
   await saveTrades(`exit ${t.code}`);
   toast("売却を記録しました"); show("home");
@@ -651,7 +652,7 @@ function editTrade(){
 }
 async function delTrade(){
   const t = S.trades.trades.find(x=>x.id===S.detailId);
-  if(!confirm(`${t.name??t.code}(${t.entryDate}取得)の登録を削除します。元に戻せません。よろしいですか?`)) return;
+  if(!confirm(`${dispName(t)}(${t.entryDate}取得)の登録を削除します。元に戻せません。よろしいですか?`)) return;
   S.trades.trades = S.trades.trades.filter(x=>x.id!==t.id);
   await saveTrades(`delete ${t.code}`);
   toast("削除しました"); show("home");
@@ -811,7 +812,7 @@ function openMonth(m, mode="entry"){
   $("mTitle").textContent = `${m.replace("-","/")} ${mode==="exit"?"売却":"エントリー"}のトレード(${list.length}件)`;
   $("mList").innerHTML = list.map(t=>{
     const pl = plOf(t);
-    return `<div class="row"><div><div class="l1">${t.name??t.code}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
+    return `<div class="row"><div><div class="l1">${dispName(t)}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
       <div class="l2 num">${t.entryDate} → ${t.exitDate??"—"}</div></div>
       <div class="r"><div class="p num ${pl==null?"":cls(pl)}">${pl==null?"—":sign(pl)}</div></div></div>`;
   }).join("");
@@ -924,7 +925,7 @@ async function openHistDay(d){
     const dTxt = dv==null ? "前日 —" : `前日 ${(dv>=0?"+":"−")+fmt(Math.abs(dv), u?2:1)} (${(dv>=0?"+":"−")+Math.abs(dv/pc*100).toFixed(2)}%)`;
     return `<div class="row" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span></span>
+        <span class="l1">${dispName(t)}<span class="tag">${t.account}</span></span>
         <span class="p num" style="font-weight:600">${p==null?"—":sym+fmt(p, u?2:1)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
