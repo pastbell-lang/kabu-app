@@ -12,13 +12,15 @@
 :root{
   --bg:#F6F5F1; --card:#FFFFFF; --ink:#1C1D21; --sub:#6B6D76; --line:#E4E2DB;
   --navy:#2E3A59; --up:#0E7A4F; --down:#C2402F; --up-bg:#E8F4EE; --down-bg:#FAEAE7;
-  --accent:#2E3A59;
+  --accent:#2E3A59; --ext:#8A63D2;
+  --chart-text:#6B6D76; --chart-grid:#C9C7BF; --chart-main:#2E3A59; --chart-entry:#9A9CA6;
 }
 @media (prefers-color-scheme: dark){
   :root{
     --bg:#141519; --card:#1E2025; --ink:#EAE8E1; --sub:#9A9CA6; --line:#33363D;
     --navy:#26314E; --up:#3BC98B; --down:#E0705B; --up-bg:#173327; --down-bg:#3A211C;
-    --accent:#8FA3D9;
+    --accent:#8FA3D9; --ext:#A98BE8;
+    --chart-text:#9A9CA6; --chart-grid:#4A4D55; --chart-main:#8FA3D9; --chart-entry:#6B6E78;
   }
   header{background:#1B2338}
   button.primary{background:#3A4A78}
@@ -86,7 +88,7 @@ table.kv td:last-child{text-align:right}
 .sug div:last-child{border-bottom:none}
 .sug .c{color:var(--sub);font-size:12px;flex-shrink:0}
 .lc{font-size:10px;font-weight:600;color:#fff;background:var(--down);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
-.ext{font-size:10px;font-weight:500;color:#8A63D2;border:1px solid #8A63D2;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
+.ext{font-size:10px;font-weight:500;color:var(--ext);border:1px solid var(--ext);border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
 .toast.show{opacity:.95}
 #lock{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
 #lock .box{width:100%;max-width:360px}
@@ -125,14 +127,14 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
   <section id="scr-home" class="screen on">
     <h2 style="margin-top:2px">市場</h2>
-    <div class="cards" id="idxCards"></div>
+    <div class="card" id="idxStrip" style="padding:8px 14px"></div>
     <h2>評価</h2>
     <div class="cards">
       <div class="card"><div class="lbl">投資評価額</div><div class="val num" id="hEval">—</div><div class="s num" id="hEvalPl"></div></div>
-      <div class="card"><div class="lbl">前日差</div><div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
+      <div class="card" id="diffCard" onclick="cycleDiff()">
+        <div class="lbl"><span id="hDiffLbl">前日差</span> <span style="font-size:10px;color:var(--sub)">タップで切替</span></div>
+        <div class="val num" id="hDiff">—</div><div class="s num" id="hDiffPct"></div></div>
       <div class="card"><div class="lbl">投資可能資産</div><div class="val num" id="hAssets">—</div><div class="s num" id="hCash"></div></div>
-      <div class="card"><div class="lbl">前月差</div><div class="val num" id="hMDiff">—</div><div class="s num" id="hMDiffPct"></div></div>
-      <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
     </div>
     <h2>口座別損益(保有株)</h2>
@@ -217,6 +219,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <label>取得単価 <span id="inUnit">(円)</span></label>
       <input type="number" inputmode="decimal" step="any" id="inPrice">
       <label>点数(任意)</label><input type="number" inputmode="decimal" step="any" id="inScore">
+      <label>メモ(任意・エントリー根拠など)</label><input id="inMemo" autocomplete="off" placeholder="決算好調、押し目">
       <div style="margin-top:16px"><button class="primary" id="inSave" onclick="saveTrade()">登録する</button></div>
       <div style="margin-top:8px" id="inCancelWrap" class="hidden"><button class="ghost" onclick="cancelEdit()">修正をやめる</button></div>
     </div>
@@ -257,6 +260,41 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
         <div><label>余力 $</label><input type="number" inputmode="decimal" step="any" id="cashMooUsd"></div>
       </div>
       <div style="margin-top:14px"><button class="primary" onclick="saveSettings()">保存する</button></div>
+    </div>
+    <h2>入出金の記録</h2>
+    <div class="card">
+      <div class="grid2">
+        <div><label>日付</label><input type="date" id="cfDate"></div>
+        <div><label>口座</label><select id="cfAcct"><option>SBI</option><option>moomoo</option></select></div>
+      </div>
+      <div class="grid2">
+        <div><label>通貨</label><select id="cfCur"><option value="jpy">円</option><option value="usd">ドル</option></select></div>
+        <div><label>金額(入金+ / 出金−)</label><input type="number" inputmode="decimal" step="any" id="cfAmt"></div>
+      </div>
+      <div style="margin-top:12px"><button class="primary" onclick="addCashflow()">記録する(余力も自動更新)</button></div>
+      <div class="list" id="cfList" style="margin-top:10px"></div>
+      <p class="note" style="margin:8px 0 0">記録すると前日差・前月差・年初来・月損益から入出金分が自動控除され、純粋な運用損益になります。</p>
+    </div>
+    <h2>表示</h2>
+    <div class="card">
+      <div class="grid2">
+        <div><label>金額の単位</label>
+          <select id="dispUnit" onchange="localStorage.setItem('kabu_unit',this.value); renderHome(); toast('表示単位を変更しました')">
+            <option value="yen">円(¥53,601,447)</option><option value="man">万円(¥5,360万)</option>
+          </select></div>
+        <div><label>文字サイズ</label>
+          <select id="fontSize" onchange="localStorage.setItem('kabu_font',this.value); applyFontSize(); toast('文字サイズを変更しました')">
+            <option value="std">標準</option><option value="big">大きめ</option>
+          </select></div>
+      </div>
+    </div>
+    <h2>LC割れ通知</h2>
+    <div class="card">
+      <label>定時更新でLC割れを検知したらGitHubのIssueを作成(GitHubアプリでプッシュ通知)</label>
+      <select id="lcAlert" onchange="saveLcAlert(this.value)">
+        <option value="off">オフ(通知しない)</option><option value="on">オン</option>
+      </select>
+      <p class="note" style="margin:8px 0 0">通知を受け取るにはiPhoneにGitHubアプリを入れ、kabu-dataリポジトリをWatchしてください。</p>
     </div>
     <h2>LC(ロスカット)ライン</h2>
     <div class="card">
@@ -330,19 +368,42 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "3.8";
+const APP_VERSION = "4.0";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
-            shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日", sortMode: localStorage.getItem("kabu_sort")||"def" };
+            shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日", sortMode: localStorage.getItem("kabu_sort")||"def", diffMode: +(localStorage.getItem("kabu_diff")||0) };
 const $ = id => document.getElementById(id);
 const USD = a => a === "moomoo" || a === "Moo" || a === "SBI米";
 // 端末ローカル(日本時間)のYYYY-MM-DD。米国株(moomoo/SBI米)は朝6時までを前日として扱う
 const localDate = d => { const x = new Date(d.getTime() - d.getTimezoneOffset()*60000); return x.toISOString().slice(0,10); };
 const bizDate = a => { const d = new Date(); if(USD(a)) d.setHours(d.getHours()-6); return localDate(d); };
-const yen = v => "¥" + Math.round(v).toLocaleString("ja-JP");
 const fmt = (v,d=2) => (+v).toLocaleString("ja-JP",{maximumFractionDigits:d});
-const sign = v => (v>=0?"+":"−") + Math.abs(Math.round(v)).toLocaleString("ja-JP");
+const unitMan = () => (localStorage.getItem("kabu_unit")||"yen") === "man";
+const yen = v => {
+  if(unitMan() && Math.abs(v) >= 10000){
+    const m = v/10000;
+    return "¥" + m.toLocaleString("ja-JP",{maximumFractionDigits: Math.abs(m)>=100?0:1}) + "万";
+  }
+  return "¥" + Math.round(v).toLocaleString("ja-JP");
+};
+const sign = v => {
+  const p = v>=0?"+":"−", a = Math.abs(v);
+  if(unitMan() && a >= 10000){
+    const m = a/10000;
+    return p + m.toLocaleString("ja-JP",{maximumFractionDigits: m>=100?0:1}) + "万";
+  }
+  return p + Math.round(a).toLocaleString("ja-JP");
+};
+// 入出金の純額(円換算)を期間で集計: from(排他) < date <= to(包含)
+function netFlowsJpy(fromExclusive, toInclusive, fx){
+  const fl = S.settings.cashflows || [];
+  return fl.reduce((a,f)=>{
+    if(f.date > fromExclusive && f.date <= toInclusive)
+      return a + f.amount * (f.currency==="usd" ? fx : 1);
+    return a;
+  }, 0);
+}
 const cls = v => v>=0 ? "pos" : "neg";
 const cashOf = () => {
   const c = S.settings.cash;
@@ -354,6 +415,7 @@ const cashTotals = () => {
   return { jpy: Object.values(c).reduce((a,v)=>a+(v.jpy||0),0),
            usd: Object.values(c).reduce((a,v)=>a+(v.usd||0),0) };
 };
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const dispName = t => (t.name && t.name!==String(t.code)) ? `${t.code} ${t.name}` : String(t.code);
 function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2600); }
 
@@ -398,6 +460,7 @@ async function getFile(name){
   return JSON.parse(dec.decode(unb64(j.content.replace(/\n/g,""))));
 }
 async function putFile(name, obj, msg){
+  if(!S.shas[name]){ try{ await getFile(name); }catch(e){} }   // キャッシュ起動直後の保険
   const body = { message: msg, content: utf8b64(JSON.stringify(obj)), sha: S.shas[name], branch:"main" };
   const r = await gh(`/repos/${S.owner}/${S.repo}/contents/data/${name}`,
     { method:"PUT", body: JSON.stringify(body) });
@@ -492,6 +555,12 @@ $("rrModeSeg").querySelectorAll("button").forEach(b=>b.onclick=()=>{ S.rrMode=b.
 $("inCode").addEventListener("input", onCodeInput);
 $("inName").addEventListener("input", onNameInput);
 
+function cycleDiff(){
+  S.diffMode = (S.diffMode+1)%3;
+  localStorage.setItem("kabu_diff", S.diffMode);
+  renderHome();
+}
+
 /* ---- LCライン率 ---- */
 function lcBasketList(name){
   const all = S.trades.trades;
@@ -535,6 +604,44 @@ function lcModeChanged(){
   }
   $("lcNow").textContent = txt;
 }
+async function addCashflow(){
+  const date = $("cfDate").value, acct = $("cfAcct").value;
+  const cur = $("cfCur").value, amt = parseFloat($("cfAmt").value);
+  if(!date || !amt) return toast("日付と金額(0以外)を入力してください");
+  const label = `${date} ${acct} ${cur==="usd"?"$":"¥"}${fmt(Math.abs(amt))} ${amt>0?"入金":"出金"}`;
+  if(!confirm(`${label} を記録し、${acct}の余力を自動更新します。よろしいですか?`)) return;
+  S.settings.cashflows = S.settings.cashflows || [];
+  S.settings.cashflows.push({date, account:acct, currency:cur, amount:amt});
+  S.settings.cashflows.sort((a,b)=>a.date<b.date?-1:1);
+  const c = S.settings.cash = S.settings.cash || {"SBI":{jpy:0,usd:0},"moomoo":{jpy:0,usd:0}};
+  c[acct] = c[acct] || {jpy:0,usd:0};
+  c[acct][cur] = (c[acct][cur]||0) + amt;
+  const t = cashTotals(); S.settings.cashJpy = t.jpy; S.settings.cashUsd = t.usd;
+  try{
+    await putFile("settings.json", S.settings, "add cashflow");
+    $("cfAmt").value = ""; renderSettings(); renderHome(); toast("記録しました");
+  }catch(e){ toast("保存に失敗: "+e.message); }
+}
+async function delCashflow(i){
+  const f = (S.settings.cashflows||[])[i];
+  if(!f) return;
+  if(!confirm(`${f.date} ${f.account} ${f.currency==="usd"?"$":"¥"}${fmt(Math.abs(f.amount))} の記録を削除し、余力を元に戻します。よろしいですか?`)) return;
+  S.settings.cashflows.splice(i,1);
+  const c = S.settings.cash;
+  if(c && c[f.account]) c[f.account][f.currency] = (c[f.account][f.currency]||0) - f.amount;
+  const t = cashTotals(); S.settings.cashJpy = t.jpy; S.settings.cashUsd = t.usd;
+  try{ await putFile("settings.json", S.settings, "delete cashflow"); renderSettings(); renderHome(); toast("削除しました"); }
+  catch(e){ toast("保存に失敗: "+e.message); }
+}
+async function saveLcAlert(v){
+  S.settings.lcAlert = (v === "on");
+  try{ await putFile("settings.json", S.settings, "lc alert "+v); toast(v==="on"?"LC割れ通知をオンにしました":"LC割れ通知をオフにしました"); }
+  catch(e){ toast("保存に失敗: "+e.message); }
+}
+function applyFontSize(){
+  document.body.style.zoom = (localStorage.getItem("kabu_font")==="big") ? "1.13" : "";
+}
+
 async function saveLc(){
   S.settings.lcMode = $("lcMode").value;
   S.settings.lcRate = parseFloat($("lcRate").value)||5;
@@ -591,17 +698,22 @@ function renderHome(){
   const assetsNow = ev + cj + cu*fx;
   // 差分は投資可能資産(評価額+余力)基準: 株の売買による現金⇄株式の移動に影響されない純粋な損益差
   const lastBefore = d => [...hist].reverse().find(r => r.date < d && r.totalAssets != null);
-  const setDiff = (idV, idP, base) => {
+  const diffModes = [["前日差", lastBefore(today)],
+                     ["前月差", lastBefore(today.slice(0,7)+"-01")],
+                     ["年初来", lastBefore(today.slice(0,4)+"-01-01")]];
+  const dm = diffModes[S.diffMode] || diffModes[0];
+  $("hDiffLbl").textContent = dm[0];
+  {
+    const base = dm[1];
     if(base){
-      const d = assetsNow - base.totalAssets;
-      $(idV).textContent = sign(d); $(idV).className = "val num "+cls(d);
-      $(idP).textContent = `${base.date.slice(2)}比 ${(d>=0?"+":"−")+Math.abs(d/base.totalAssets*100).toFixed(2)}%`;
-      $(idP).className = "s num "+cls(d);
-    } else { $(idV).textContent="—"; $(idP).textContent="基準データなし"; $(idP).className="s num"; }
-  };
-  setDiff("hDiff","hDiffPct", lastBefore(today));
-  setDiff("hMDiff","hMDiffPct", lastBefore(today.slice(0,7)+"-01"));            // 前月末
-  setDiff("hYDiff","hYDiffPct", lastBefore(today.slice(0,4)+"-01-01"));         // 前年末
+      const flows = netFlowsJpy(base.date, today, fx);
+      const d = assetsNow - base.totalAssets - flows;
+      $("hDiff").textContent = sign(d); $("hDiff").className = "val num "+cls(d);
+      $("hDiffPct").textContent = `${base.date.slice(2)}比 ${(d>=0?"+":"−")+Math.abs(d/base.totalAssets*100).toFixed(2)}%`
+        + (flows ? " ・ 入出金控除済" : "");
+      $("hDiffPct").className = "s num "+cls(d);
+    } else { $("hDiff").textContent="—"; $("hDiffPct").textContent="基準データなし"; $("hDiffPct").className="s num"; }
+  }
   $("hAssets").textContent = yen(assetsNow);
   $("hCash").textContent = `余力 ¥${fmt(cj,0)} + $${fmt(cu)}`;
   let realized=0;
@@ -675,19 +787,19 @@ function renderHome(){
   $("holdListUs").innerHTML = us.map(rowHtml).join("") || empty;
   // 指数カード(前日差額と前日比は履歴の前営業日基準)
   const idxPrev = [...hist].reverse().find(r=>r.date < today);
-  const idxCard = (label, cur, prev, digits) => {
-    if(cur==null) return `<div class="card"><div class="lbl">${label}</div><div class="val num">—</div></div>`;
-    let sub = "", c = "";
+  const idxLine = (label, cur, prev) => {
+    if(cur==null) return `<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span>${label}</span><span class="num">—</span></div>`;
+    let d="";
     if(prev!=null && prev>0){
-      const d = cur - prev, pctv = d/prev*100;
-      c = cls(d);
-      sub = `<div class="s num ${c}">${(d>=0?"+":"−")+fmt(Math.abs(d),digits)} (${(d>=0?"+":"−")+Math.abs(pctv).toFixed(2)}%)</div>`;
+      const v=cur-prev, pc=v/prev*100;
+      d = `<span class="num ${cls(v)}" style="margin-left:10px">${(v>=0?"+":"−")+fmt(Math.abs(v),0)} (${(v>=0?"+":"−")+Math.abs(pc).toFixed(2)}%)</span>`;
     }
-    return `<div class="card"><div class="lbl">${label}</div><div class="val num">${fmt(cur,digits)}</div>${sub}</div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;padding:3px 0">
+      <span style="color:var(--sub)">${label}</span><span><span class="num" style="font-weight:600">${fmt(cur,0)}</span>${d}</span></div>`;
   };
-  $("idxCards").innerHTML =
-    idxCard("NIKKEI225", S.prices.nikkei, idxPrev?idxPrev.nikkei:null, 2) +
-    idxCard("S&P500",   S.prices.sp500,  idxPrev?idxPrev.sp500:null, 2);
+  $("idxStrip").innerHTML =
+    idxLine("NIKKEI225", S.prices.nikkei, idxPrev?idxPrev.nikkei:null) +
+    idxLine("S&P500",   S.prices.sp500,  idxPrev?idxPrev.sp500:null);
 }
 
 /* ================= 個別株 ================= */
@@ -722,6 +834,7 @@ async function openDetail(id){
     [lcLabel()+"ライン", (u?"$":"¥")+fmt(t.entryPrice*(1-currentLcRate()))],
     ["保有日数", days+"日"],
     ["点数", t.score??"—"],
+    ...(t.memo ? [["メモ", t.memo]] : []),
   ].map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("");
   $("exUnit").textContent = u? "($)" : "(円)";
   $("exDate").value = bizDate(t.account);
@@ -748,7 +861,7 @@ function editTrade(){
   $("inAcct").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v===t.account));
   $("inUnit").textContent = USD(t.account)?"($)":"(円)";
   $("inDate").value=t.entryDate; $("inQty").value=t.qty;
-  $("inPrice").value=t.entryPrice; $("inScore").value=t.score??"";
+  $("inPrice").value=t.entryPrice; $("inScore").value=t.score??""; $("inMemo").value=t.memo??"";
   $("inSave").textContent="修正を保存する";
   $("inCancelWrap").classList.remove("hidden");
   show("input");
@@ -782,19 +895,19 @@ async function drawStockChart(t){
   const Y = v => c.height-pad - (c.height-2*pad)*(v-lo)/((hi-lo)||1);
   // 取得単価(点線・グレー)とLC5%ライン(点線・赤)
   ctx.setLineDash([6,6]);
-  ctx.strokeStyle="#9A9CA6"; ctx.lineWidth=1.2;
+  ctx.strokeStyle=cssVar("--chart-entry"); ctx.lineWidth=1.2;
   ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice)); ctx.lineTo(c.width-pad,Y(t.entryPrice)); ctx.stroke();
-  ctx.strokeStyle="#C2402F";
+  ctx.strokeStyle=cssVar("--down");
   ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice*(1-lcr))); ctx.lineTo(c.width-pad,Y(t.entryPrice*(1-lcr))); ctx.stroke();
   ctx.setLineDash([]);
   // 終値ライン
-  ctx.strokeStyle="#2E3A59"; ctx.lineWidth=3; ctx.beginPath();
+  ctx.strokeStyle=cssVar("--chart-main"); ctx.lineWidth=3; ctx.beginPath();
   pts.forEach((p,i)=>i?ctx.lineTo(X(i),Y(p.v)):ctx.moveTo(X(i),Y(p.v)));
   ctx.stroke();
-  ctx.fillStyle="#2E3A59";
+  ctx.fillStyle=cssVar("--chart-main");
   const last = pts[pts.length-1];
   ctx.beginPath(); ctx.arc(X(pts.length-1), Y(last.v), 5, 0, 7); ctx.fill();
-  ctx.fillStyle="#6B6D76"; ctx.font="19px sans-serif";
+  ctx.fillStyle=cssVar("--chart-text"); ctx.font="19px sans-serif";
   const u = USD(t.account);
   ctx.fillText(fmt(hi, u?2:0), 4, Y(hi)+7);
   ctx.fillText(fmt(lo, u?2:0), 4, Y(lo)+7);
@@ -807,7 +920,7 @@ async function drawStockChart(t){
 function resetInputForm(){
   S.editingId=null;
   $("inTitle").textContent="銘柄登録";
-  ["inCode","inName","inQty","inPrice","inScore"].forEach(i=>$(i).value="");
+  ["inCode","inName","inQty","inPrice","inScore","inMemo"].forEach(i=>$(i).value="");
   $("inDate").value = bizDate(S.acct);
   $("inSave").textContent="登録する";
   $("inCancelWrap").classList.add("hidden");
@@ -818,16 +931,17 @@ async function saveTrade(){
   const code=$("inCode").value.trim().toUpperCase(), name=$("inName").value.trim();
   const d=$("inDate").value, qty=parseFloat($("inQty").value), price=parseFloat($("inPrice").value);
   const score=$("inScore").value===""?null:parseFloat($("inScore").value);
+  const memo=$("inMemo").value.trim()||null;
   if(!code||!d||!(qty>0)||!(price>0)) return toast("コード・取得日・株数・取得単価を入力してください");
   if(S.editingId!=null){
     const t=S.trades.trades.find(x=>x.id===S.editingId);
-    Object.assign(t,{code,name:name||t.name,account:S.acct,entryDate:d,qty,entryPrice:price,score});
+    Object.assign(t,{code,name:name||t.name,account:S.acct,entryDate:d,qty,entryPrice:price,score,memo});
     await saveTrades(`edit ${code}`);
     toast("修正を保存しました"); resetInputForm(); show("home");
   } else {
     const id = Math.max(0,...S.trades.trades.map(t=>t.id)) + 1;
     S.trades.trades.push({id,entryDate:d,exitDate:null,code,name:name||code,account:S.acct,
-      score,entryPrice:price,exitPrice:null,qty});
+      score,entryPrice:price,exitPrice:null,qty,memo});
     await saveTrades(`add ${code}`);
     toast(`${name||code} を登録しました。次回更新から株価を取得します`);
     resetInputForm(); show("home");
@@ -935,7 +1049,7 @@ function renderHistory(){
   const c = $("chart"), ctx = c.getContext("2d");
   ctx.clearRect(0,0,c.width,c.height);
   const series = [
-    {k:"totalAssets", label:"投資可能資産", color:"#2E3A59", w:3.5},
+    {k:"totalAssets", label:"投資可能資産", color:cssVar("--chart-main"), w:3.5},
     {k:"nikkei",      label:"NIKKEI225",   color:"#C2402F", w:1.8},
     {k:"sp500",       label:"S&P500",      color:"#0E7A4F", w:1.8},
     {k:"nasdaq",      label:"NASDAQ",      color:"#8A63D2", w:1.8},
@@ -953,7 +1067,7 @@ function renderHistory(){
     const Y = v => c.height-pad - (c.height-2*pad)*(v-min)/((max-min)||1);
     // 100の基準線(点線)
     if(min<=100 && 100<=max){
-      ctx.strokeStyle="#C9C7BF"; ctx.lineWidth=1; ctx.setLineDash([6,6]);
+      ctx.strokeStyle=cssVar("--chart-grid"); ctx.lineWidth=1; ctx.setLineDash([6,6]);
       ctx.beginPath(); ctx.moveTo(pad,Y(100)); ctx.lineTo(c.width-pad,Y(100)); ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -967,7 +1081,7 @@ function renderHistory(){
       });
       if(started) ctx.stroke();
     });
-    ctx.fillStyle="#6B6D76"; ctx.font="20px sans-serif";
+    ctx.fillStyle=cssVar("--chart-text"); ctx.font="20px sans-serif";
     ctx.fillText(max.toFixed(0), 4, Y(max)+7);
     ctx.fillText(min.toFixed(0), 4, Y(min)+7);
     if(min<=100 && 100<=max) ctx.fillText("100", 4, Y(100)+7);
@@ -983,7 +1097,8 @@ function renderHistory(){
   const months = [...byMonth.keys()].sort().reverse();
   $("histList").innerHTML = months.map((m,i)=>{
     const r = byMonth.get(m), prev = byMonth.get(months[i+1]);
-    const d = prev && r.totalAssets!=null && prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
+    const d = prev && r.totalAssets!=null && prev.totalAssets!=null
+      ? r.totalAssets-prev.totalAssets-netFlowsJpy(prev.date, r.date, r.fx||S.prices.usdjpy) : null;
     return `<div class="row" onclick="openHistMonth('${m}')"><div><div class="l1 num">${m.replace("-","/")}</div>
       <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
@@ -998,7 +1113,8 @@ function openHistMonth(m){
   $("hdTitle").textContent = `${m.replace("-","/")} の損益履歴(${rows.length}日)`;
   $("hdList").innerHTML = rows.map(([r,i])=>{
     const prev = h[i-1];
-    const d = prev && r.totalAssets!=null && prev.totalAssets!=null ? r.totalAssets-prev.totalAssets : null;
+    const d = prev && r.totalAssets!=null && prev.totalAssets!=null
+      ? r.totalAssets-prev.totalAssets-netFlowsJpy(prev.date, r.date, r.fx||S.prices.usdjpy) : null;
     return `<div class="row" onclick="openHistDay('${r.date}')"><div><div class="l1 num" style="font-size:14px">${r.date}</div>
       <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
@@ -1073,6 +1189,16 @@ function renderSettings(){
   $("lcMode").value = S.settings.lcMode || "fixed";
   $("lcRate").value = S.settings.lcRate ?? 5;
   lcModeChanged();
+  $("dispUnit").value = localStorage.getItem("kabu_unit")||"yen";
+  $("fontSize").value = localStorage.getItem("kabu_font")||"std";
+  $("lcAlert").value = S.settings.lcAlert ? "on" : "off";
+  if(!$("cfDate").value) $("cfDate").value = localDate(new Date());
+  const fl = S.settings.cashflows || [];
+  $("cfList").innerHTML = fl.slice(-5).reverse().map((f,ri)=>{
+    const i = fl.length-1-ri;
+    return `<div class="row"><span class="l2 num">${f.date} ${f.account} ${f.currency==="usd"?"$":"¥"}${fmt(f.amount)}</span>
+      <button class="ghost danger" style="width:auto;padding:4px 10px;font-size:12px" onclick="delCashflow(${i})">削除</button></div>`;
+  }).join("") || `<div class="row"><span class="l2">記録はまだありません</span></div>`;
   ensureMaster().then(()=>{
     const m = S.master||{};
     $("masterInfo").textContent =
@@ -1111,7 +1237,7 @@ async function saveSettings(){
   catch(e){ toast("保存に失敗: "+e.message); }
 }
 /* ---- CSV 共通 ---- */
-const TRADE_COLS = ["id","entryDate","exitDate","code","name","account","score","entryPrice","exitPrice","qty"];
+const TRADE_COLS = ["id","entryDate","exitDate","code","name","account","score","entryPrice","exitPrice","qty","memo"];
 const HIST_COLS  = ["date","fx","evaluation","cashJpy","cashUsd","totalAssets","invested","capitalGain","nikkei","sp500","nasdaq","dow"];
 function csvEscape(v){ v = v==null? "" : String(v); return /[",\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
 function toCsv(rows, cols){
@@ -1173,7 +1299,7 @@ async function importTradesCsv(input){
       if(o.exitDate!=="" && !(xp>0)) return errs.push(`${line}行目: exit済みなのに exitPrice が不正`);
       out.push({ id:0, entryDate:o.entryDate, exitDate:o.exitDate||null, code:String(o.code).trim(),
         name:o.name||String(o.code), account:o.account||"SBI日", score:(sc===null||isNaN(sc))?null:sc,
-        entryPrice:ep, exitPrice:o.exitDate?xp:null, qty:qty });
+        entryPrice:ep, exitPrice:o.exitDate?xp:null, qty:qty, memo:o.memo||null });
     });
     if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
     if(!out.length) return toast("有効な行がありません");
@@ -1364,13 +1490,25 @@ async function doRefresh(){
 async function loadAll(){
   [S.trades, S.prices, S.history, S.settings, S.risk] = await Promise.all(
     ["trades.json","prices.json","history.json","settings.json","marginal_risk.json"].map(getFile));
+  try{ localStorage.setItem("kabu_cache", JSON.stringify(
+    {trades:S.trades, prices:S.prices, history:S.history, settings:S.settings, risk:S.risk})); }
+  catch(e){}
 }
 async function boot(){
   const cfg = JSON.parse(localStorage.getItem("kabu_cfg")||"null");
   const cached = sessionStorage.getItem("kabu_tok");
   if(cfg && cached){
     S.owner=cfg.owner; S.repo=cfg.repo; S.token=cached;
-    try{ await loadAll(); $("lock").classList.add("hidden"); show("home"); return; }
+    // 前回データを即表示 → 裏で最新化(体感高速化)
+    const cache = JSON.parse(localStorage.getItem("kabu_cache")||"null");
+    if(cache && cache.trades && cache.prices && cache.history && cache.settings && cache.risk){
+      Object.assign(S, {trades:cache.trades, prices:cache.prices, history:cache.history,
+                        settings:cache.settings, risk:cache.risk});
+      $("lock").classList.add("hidden"); show("home"); checkPatExpiry();
+      loadAll().then(()=>{ renderHome(); renderMeta(); }).catch(()=>{});
+      return;
+    }
+    try{ await loadAll(); $("lock").classList.add("hidden"); show("home"); checkPatExpiry(); return; }
     catch(e){ sessionStorage.removeItem("kabu_tok"); }
   }
   if(!cfg){
@@ -1411,6 +1549,7 @@ $("resetCfg").onclick = resetAll;
 $("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("unlockBtn").click(); });
 document.getElementById("hVer").textContent = `v${APP_VERSION}(${APP_DATE.replace(/-/g,"/")})`;
 document.getElementById("verNote2").textContent = `アプリ v${APP_VERSION}(${APP_DATE} 更新)・ `;
+applyFontSize();
 resetInputForm();
 boot();
 </script>
