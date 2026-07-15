@@ -5,12 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="株式実績">
+<link rel="apple-touch-icon" href="icon.png">
 <title>株式売買実績</title>
 <style>
 :root{
   --bg:#F6F5F1; --card:#FFFFFF; --ink:#1C1D21; --sub:#6B6D76; --line:#E4E2DB;
   --navy:#2E3A59; --up:#0E7A4F; --down:#C2402F; --up-bg:#E8F4EE; --down-bg:#FAEAE7;
   --accent:#2E3A59;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#141519; --card:#1E2025; --ink:#EAE8E1; --sub:#9A9CA6; --line:#33363D;
+    --navy:#26314E; --up:#3BC98B; --down:#E0705B; --up-bg:#173327; --down-bg:#3A211C;
+    --accent:#8FA3D9;
+  }
+  header{background:#1B2338}
+  button.primary{background:#3A4A78}
+  .seg button.on{background:#3A4A78;border-color:#3A4A78}
+  nav button.on{color:#A9BCE8}
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{font-size:16px}
@@ -72,6 +85,7 @@ table.kv td:last-child{text-align:right}
 .sug div{padding:10px 12px;font-size:14px;border-bottom:0.5px solid var(--line);display:flex;justify-content:space-between;gap:10px}
 .sug div:last-child{border-bottom:none}
 .sug .c{color:var(--sub);font-size:12px;flex-shrink:0}
+.lc{font-size:10px;font-weight:600;color:#fff;background:var(--down);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
 .ext{font-size:10px;font-weight:500;color:#8A63D2;border:1px solid #8A63D2;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
 .toast.show{opacity:.95}
 #lock{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
@@ -103,11 +117,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 </div>
 
 <header>
-  <h1 id="hTitle">株式売買実績</h1>
+  <h1 id="hTitle">株式売買実績 <span id="hVer" style="font-size:11px;font-weight:400;opacity:.75"></span></h1>
   <button id="refreshBtn" onclick="doRefresh()">↻ 最新に更新</button>
 </header>
 <main>
-  <p class="note num" id="verLine" style="margin:0 2px 6px;text-align:left"></p>
   <div class="meta"><span id="metaLeft">—</span><span id="metaRight"></span></div>
 
   <section id="scr-home" class="screen on">
@@ -121,6 +134,9 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="card"><div class="lbl">前月差</div><div class="val num" id="hMDiff">—</div><div class="s num" id="hMDiffPct"></div></div>
       <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
+    </div>
+    <div class="seg" id="sortSeg" style="margin:16px 0 0">
+      <button data-m="def" class="on">登録順</button><button data-m="pl">損益率順</button><button data-m="day">前日比順</button>
     </div>
     <h2 id="hTitleJp">保有株(日本株)</h2>
     <div class="list" id="holdListJp"></div>
@@ -139,6 +155,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="num" id="dPl" style="font-size:14px;margin-top:2px"></div>
     </div>
     <div class="card"><table class="kv" id="dTable"></table></div>
+    <div id="dChartWrap" class="hidden" style="margin-top:10px">
+      <canvas id="dChart" width="1040" height="300"></canvas>
+      <p class="note" style="margin:4px 2px 0">取得日からの終値推移。点線=取得単価、赤点線=LC(5%)ライン</p>
+    </div>
     <h2>売却(exit)を入力</h2>
     <div class="card">
       <div class="grid2">
@@ -154,10 +174,21 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   </section>
 
   <section id="scr-rr" class="screen">
-    <div class="cards" id="rrCards"></div>
-    <h2>月毎のRR比率(エントリー日基準)</h2>
-    <div class="list" id="rrMonths"></div>
-    <p class="note">RR比率 = 平均利益 ÷ 平均損失(米ドル口座は現在レートで円換算)。限界率は限界リスク表による1回あたり最大リスク量。</p>
+    <div class="seg" id="rrModeSeg" style="margin-bottom:12px">
+      <button data-m="rr" class="on">RR分析</button><button data-m="pl">実現損益</button>
+    </div>
+    <div id="rrView">
+      <div class="cards" id="rrCards"></div>
+      <h2>月毎のRR比率(エントリー日基準)</h2>
+      <div class="list" id="rrMonths"></div>
+      <p class="note">RR比率 = 平均利益 ÷ 平均損失(米ドル口座は現在レートで円換算)。限界率は限界リスク表による1回あたり最大リスク量。</p>
+    </div>
+    <div id="plView" class="hidden">
+      <div class="cards" id="plCards"></div>
+      <h2>実現損益(exit月別)</h2>
+      <div class="list" id="plMonths"></div>
+      <p class="note">清算済みトレードの損益を売却日の月で集計(米ドル口座は現在レートで円換算)。年の行は年間合計。</p>
+    </div>
   </section>
 
   <section id="scr-month" class="screen">
@@ -250,6 +281,11 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div style="margin-top:10px"><button class="ghost" id="refetchBtn" onclick="refetchCloses()">再取得を実行</button></div>
       <p class="note" style="margin:8px 0 0">配当調整なしの実際の終値で揃え直します(2〜5分)。細かな手直しは上の「銘柄終値」CSVで行えます。</p>
     </div>
+    <h2>アクセストークンの有効期限</h2>
+    <div class="card">
+      <label>期限日を登録しておくと、14日前から起動時に警告します</label>
+      <input type="date" id="patExp" onchange="localStorage.setItem('kabu_pat_exp', this.value); toast('期限日を保存しました')">
+    </div>
     <h2>その他</h2>
     <div class="card">
       <div><button class="ghost" onclick="lockApp()">ロックする(パスワード再入力)</button></div>
@@ -270,11 +306,11 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "2.2";
-const APP_DATE = "2026-07-14";
+const APP_VERSION = "3.0";
+const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
-            shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日" };
+            shas:{}, token:null, owner:null, repo:null, editingId:null, detailId:null, acct:"SBI日", sortMode: localStorage.getItem("kabu_sort")||"def" };
 const $ = id => document.getElementById(id);
 const USD = a => a === "moomoo" || a === "Moo" || a === "SBI米";
 // 端末ローカル(日本時間)のYYYY-MM-DD。米国株(moomoo/SBI米)は朝6時までを前日として扱う
@@ -409,6 +445,15 @@ function onNameInput(){
   const lo = v.toLowerCase();
   showSug(masterList().filter(([c,n])=>n.toLowerCase().includes(lo)));
 }
+$("sortSeg").querySelectorAll("button").forEach(b=>{
+  b.classList.toggle("on", b.dataset.m===S.sortMode);
+  b.onclick = ()=>{
+    S.sortMode = b.dataset.m; localStorage.setItem("kabu_sort", S.sortMode);
+    $("sortSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+    renderHome();
+  };
+});
+$("rrModeSeg").querySelectorAll("button").forEach(b=>b.onclick=()=>{ S.rrMode=b.dataset.m; renderRR(); });
 $("inCode").addEventListener("input", onCodeInput);
 $("inName").addEventListener("input", onNameInput);
 
@@ -499,7 +544,7 @@ function renderHome(){
       ? `<div class="l2 num" style="margin-top:3px;font-size:11px">通常取引終値 ${sym}${fmt(sess.regular, u?2:1)}(${sess.phase==="pre"?"プレマーケット":"アフターマーケット"}で${(p-sess.regular>=0?"+":"−")+sym+fmt(Math.abs(p-sess.regular), u?2:1)})</div>` : "";
     return `<div class="row" onclick="openDetail(${t.id})" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span></span>
+        <span class="l1">${t.name??t.code}<span class="tag">${t.account}</span>${(p!=null&&t.entryPrice&&p<t.entryPrice*0.95)?'<span class="lc">LC割れ</span>':''}</span>
         <span class="p num" style="font-weight:600">${badge}${cur}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
@@ -508,7 +553,17 @@ function renderHome(){
         <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
         <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div>${extNote}</div>`;
   };
-  const jp = open.filter(t=>!USD(t.account)), us = open.filter(t=>USD(t.account));
+  const sortKey = t => {
+    const p = priceOf(t);
+    if(S.sortMode==="pl") return (p!=null && t.entryPrice)? (p/t.entryPrice-1) : -1e9;
+    if(S.sortMode==="day"){
+      const pc = S.prices.prevClose ? S.prices.prevClose[String(t.code)] : null;
+      return (p!=null && pc)? (p/pc-1) : -1e9;
+    }
+    return -t.id;   // 登録順(新しい順ではなく登録順=昇順にするため-無し? idそのまま昇順)
+  };
+  const sorter = (a,b)=> S.sortMode==="def" ? a.id-b.id : sortKey(b)-sortKey(a);
+  const jp = open.filter(t=>!USD(t.account)).sort(sorter), us = open.filter(t=>USD(t.account)).sort(sorter);
   const empty = `<div class="row"><div class="l2">保有株はありません。「入力」から登録できます。</div></div>`;
   $("hTitleJp").textContent = `保有株・日本株(${jp.length}銘柄)`;
   $("holdListJp").innerHTML = jp.map(rowHtml).join("") || empty;
@@ -532,7 +587,7 @@ function renderHome(){
 }
 
 /* ================= 個別株 ================= */
-function openDetail(id){
+async function openDetail(id){
   S.detailId = id;
   const t = S.trades.trades.find(x=>x.id===id); if(!t) return;
   const p = priceOf(t), pl = plOf(t), u = USD(t.account);
@@ -568,6 +623,7 @@ function openDetail(id){
   $("exDate").value = bizDate(t.account);
   $("exPrice").value = p??"";
   show("detail");
+  drawStockChart(t);
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.s==="home"));
 }
 async function doExit(){
@@ -599,6 +655,47 @@ async function delTrade(){
   S.trades.trades = S.trades.trades.filter(x=>x.id!==t.id);
   await saveTrades(`delete ${t.code}`);
   toast("削除しました"); show("home");
+}
+
+async function drawStockChart(t){
+  $("dChartWrap").classList.add("hidden");
+  await ensureStockPrices();
+  const by = S.stockPrices.byDate || {};
+  const code = String(t.code);
+  const pts = Object.keys(by).sort()
+    .filter(d=>d>=t.entryDate && by[d][code]!=null)
+    .map(d=>({d, v:by[d][code]}));
+  const live = priceOf(t);
+  if(live!=null && (!pts.length || pts[pts.length-1].v!==live)) pts.push({d:"now", v:live});
+  if(pts.length < 2 || S.detailId !== t.id) return;
+  const c = $("dChart"), ctx = c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+  const vals = pts.map(p=>p.v);
+  const lo = Math.min(...vals, t.entryPrice*0.94), hi = Math.max(...vals, t.entryPrice*1.01);
+  const pad = 46;
+  const X = i => pad + (c.width-2*pad)*i/(pts.length-1);
+  const Y = v => c.height-pad - (c.height-2*pad)*(v-lo)/((hi-lo)||1);
+  // 取得単価(点線・グレー)とLC5%ライン(点線・赤)
+  ctx.setLineDash([6,6]);
+  ctx.strokeStyle="#9A9CA6"; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice)); ctx.lineTo(c.width-pad,Y(t.entryPrice)); ctx.stroke();
+  ctx.strokeStyle="#C2402F";
+  ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice*0.95)); ctx.lineTo(c.width-pad,Y(t.entryPrice*0.95)); ctx.stroke();
+  ctx.setLineDash([]);
+  // 終値ライン
+  ctx.strokeStyle="#2E3A59"; ctx.lineWidth=3; ctx.beginPath();
+  pts.forEach((p,i)=>i?ctx.lineTo(X(i),Y(p.v)):ctx.moveTo(X(i),Y(p.v)));
+  ctx.stroke();
+  ctx.fillStyle="#2E3A59";
+  const last = pts[pts.length-1];
+  ctx.beginPath(); ctx.arc(X(pts.length-1), Y(last.v), 5, 0, 7); ctx.fill();
+  ctx.fillStyle="#6B6D76"; ctx.font="19px sans-serif";
+  const u = USD(t.account);
+  ctx.fillText(fmt(hi, u?2:0), 4, Y(hi)+7);
+  ctx.fillText(fmt(lo, u?2:0), 4, Y(lo)+7);
+  ctx.fillText(t.entryDate.slice(2), pad, c.height-8);
+  ctx.textAlign="right"; ctx.fillText("現在", c.width-8, c.height-8); ctx.textAlign="left";
+  $("dChartWrap").classList.remove("hidden");
 }
 
 /* ================= 入力 ================= */
@@ -638,6 +735,11 @@ async function saveTrades(msg){
 
 /* ================= RR分析 ================= */
 function renderRR(){
+  const mode = S.rrMode || "rr";
+  $("rrModeSeg").querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.m===mode));
+  $("rrView").classList.toggle("hidden", mode!=="rr");
+  $("plView").classList.toggle("hidden", mode!=="pl");
+  if(mode==="pl"){ renderRealized(); return; }
   const all = S.trades.trades;
   const cutoff = edateMinus1(new Date(S.prices.updatedAt));
   const baskets = [
@@ -667,10 +769,46 @@ function renderRR(){
       <span class="num" style="font-size:11px;color:var(--sub);width:72px;text-align:right">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}</span></div>`;
   }).join("");
 }
-function openMonth(m){
-  const list = S.trades.trades.filter(t=>t.entryDate.slice(0,7)===m)
+function renderRealized(){
+  const closed = S.trades.trades.filter(t=>t.exitDate && plOf(t)!=null);
+  const byM = new Map();
+  closed.forEach(t=>{
+    const k = t.exitDate.slice(0,7);
+    if(!byM.has(k)) byM.set(k, []);
+    byM.get(k).push(t);
+  });
+  const months = [...byM.keys()].sort().reverse();
+  const sum = list => list.reduce((a,t)=>a+plOf(t), 0);
+  // 上部カード: 今年・累計
+  const thisYear = String(new Date().getFullYear());
+  const yearSum = closed.filter(t=>t.exitDate.startsWith(thisYear));
+  const allSum = sum(closed) + (S.settings.capitalGainOffset||0);
+  $("plCards").innerHTML =
+    `<div class="card"><div class="lbl">${thisYear}年 実現損益</div><div class="val num ${cls(sum(yearSum))}">${sign(sum(yearSum))}</div><div class="s num">${yearSum.length}トレード</div></div>` +
+    `<div class="card"><div class="lbl">実現損益 累計</div><div class="val num ${cls(allSum)}">${sign(allSum)}</div><div class="s">キャピタルGain(移行分含む)</div></div>`;
+  // 年見出し+月行
+  let html = "", curYear = "";
+  months.forEach(m=>{
+    const y = m.slice(0,4);
+    if(y !== curYear){
+      curYear = y;
+      const ySum = sum(closed.filter(t=>t.exitDate.startsWith(y)));
+      const yN = closed.filter(t=>t.exitDate.startsWith(y)).length;
+      html += `<div class="row" style="background:var(--bg)"><span class="l1 num" style="font-weight:600">${y}年</span>
+        <span class="p num ${cls(ySum)}" style="font-weight:600">${sign(ySum)} <span class="tag">${yN}件</span></span></div>`;
+    }
+    const list = byM.get(m), v = sum(list);
+    html += `<div class="row" onclick="openMonth('${m}','exit')">
+      <span class="l1 num" style="padding-left:12px">${m.replace("-","/")}</span>
+      <span class="p num ${cls(v)}">${sign(v)} <span class="tag">${list.length}件</span></span></div>`;
+  });
+  $("plMonths").innerHTML = html || `<div class="row"><div class="l2">清算済みトレードがありません</div></div>`;
+}
+function openMonth(m, mode="entry"){
+  const list = S.trades.trades.filter(t=>
+      mode==="exit" ? (t.exitDate && t.exitDate.slice(0,7)===m) : t.entryDate.slice(0,7)===m)
     .sort((a,b)=>a.entryDate<b.entryDate?1:-1);
-  $("mTitle").textContent = `${m.replace("-","/")} エントリーのトレード(${list.length}件)`;
+  $("mTitle").textContent = `${m.replace("-","/")} ${mode==="exit"?"売却":"エントリー"}のトレード(${list.length}件)`;
   $("mList").innerHTML = list.map(t=>{
     const pl = plOf(t);
     return `<div class="row"><div><div class="l1">${t.name??t.code}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
@@ -810,6 +948,7 @@ async function openHistDay(d){
 function renderSettings(){
   $("setCashJpy").value = S.settings.cashJpy??0;
   $("setCashUsd").value = S.settings.cashUsd??0;
+  $("patExp").value = localStorage.getItem("kabu_pat_exp")||"";
   ensureMaster().then(()=>{
     const m = S.master||{};
     $("masterInfo").textContent =
@@ -820,24 +959,20 @@ async function updateMaster(){
   const btn = $("masterBtn");
   btn.disabled = true; btn.textContent = "更新中…";
   try{
-    const before = S.master?.updatedAt;
+    const prev = await latestRunId("master.yml");
     const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/master.yml/dispatches`,
       { method:"POST", body: JSON.stringify({ref:"main"}) });
     if(!r.ok) throw new Error("起動失敗 ("+r.status+")");
     toast("銘柄情報を取得しています(1〜2分かかります)");
-    for(let i=0;i<12;i++){
-      await new Promise(s=>setTimeout(s,15000));
-      try{
-        const m = await getRaw("master.json");
-        if(m.updatedAt !== before){
-          S.master = m; renderSettings();
-          toast(`銘柄マスターを更新しました(日本株${m.jp.length} / 米国株${m.us.length})`);
-          btn.disabled=false; btn.textContent="最新の銘柄情報に更新"; return;
-        }
-      }catch(e){}
-      btn.textContent = "更新中… "+(i+1)*15+"秒";
+    const ok = await waitForWorkflow("master.yml", prev, 300, s=>btn.textContent="更新中… "+s+"秒");
+    if(ok === true){
+      S.master = await getRaw("master.json"); renderSettings();
+      toast(`銘柄マスターを更新しました(日本株${S.master.jp.length} / 米国株${S.master.us.length})`);
+    } else if(ok === false){
+      toast("マスター更新がエラーで終了しました。GitHubのActionsログをご確認ください");
+    } else {
+      toast("時間内に完了を確認できませんでした。しばらくして設定画面を開き直してください");
     }
-    toast("時間内に完了しませんでした。しばらくして設定画面を開き直してください");
   }catch(e){ toast("更新に失敗: "+e.message); }
   btn.disabled=false; btn.textContent="最新の銘柄情報に更新";
 }
@@ -978,24 +1113,20 @@ async function refetchCloses(){
   const btn = $("refetchBtn");
   btn.disabled = true; btn.textContent = "再取得中…";
   try{
-    const before = S.prices.updatedAt;
+    const prev = await latestRunId("update.yml");
     const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/update.yml/dispatches`,
       { method:"POST", body: JSON.stringify({ref:"main", inputs:{refetch_from: from}}) });
     if(!r.ok) throw new Error("起動失敗 ("+r.status+")");
     toast("再取得を開始しました(2〜5分かかります)");
-    for(let i=0;i<20;i++){
-      await new Promise(s=>setTimeout(s,15000));
-      try{
-        const p = await getFile("prices.json");
-        if(p.updatedAt !== before){
-          S.prices = p; S.stockPrices = null;   // 次回表示時に再読込
-          toast("終値の再取得が完了しました");
-          btn.disabled=false; btn.textContent="再取得を実行"; return;
-        }
-      }catch(e){}
-      btn.textContent = "再取得中… "+(i+1)*15+"秒";
+    const ok = await waitForWorkflow("update.yml", prev, 600, s=>btn.textContent="再取得中… "+s+"秒");
+    if(ok === true){
+      S.prices = await getFile("prices.json"); S.stockPrices = null;
+      toast("終値の再取得が完了しました");
+    } else if(ok === false){
+      toast("再取得がエラーで終了しました。GitHubのActionsログをご確認ください");
+    } else {
+      toast("時間内に完了を確認できませんでした。Actionsのログをご確認ください");
     }
-    toast("時間内に完了を確認できませんでした。Actionsのログをご確認ください");
   }catch(e){ toast("再取得に失敗: "+e.message); }
   btn.disabled=false; btn.textContent="再取得を実行";
 }
@@ -1043,30 +1174,60 @@ function resetAll(){
   }
 }
 
+/* ---- PAT期限チェック ---- */
+function checkPatExpiry(){
+  const exp = localStorage.getItem("kabu_pat_exp");
+  if(!exp) return;
+  const days = Math.floor((new Date(exp) - new Date())/864e5);
+  if(days < 0) toast(`アクセストークンの期限(${exp})が切れています。再発行して設定し直してください`);
+  else if(days <= 14) toast(`アクセストークンの期限まであと${days}日です(${exp})。早めの再発行をおすすめします`);
+}
+
+/* ---- ワークフロー実行の監視(Actions API) ---- */
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+async function latestRunId(wf){
+  try{
+    const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/${wf}/runs?per_page=1&t=${Date.now()}`);
+    if(!r.ok) return 0;
+    return (await r.json()).workflow_runs?.[0]?.id ?? 0;
+  }catch(e){ return 0; }
+}
+async function waitForWorkflow(wf, prevId, maxSec, onTick){
+  const t0 = Date.now();
+  while((Date.now()-t0)/1000 < maxSec){
+    await sleep(4000);
+    try{
+      const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/${wf}/runs?per_page=1&t=${Date.now()}`);
+      const run = (await r.json()).workflow_runs?.[0];
+      if(run && run.id !== prevId && run.status === "completed")
+        return run.conclusion === "success";
+    }catch(e){}
+    if(onTick) onTick(Math.round((Date.now()-t0)/1000));
+  }
+  return null;   // タイムアウト
+}
+
 /* ================= 更新ボタン ================= */
 async function doRefresh(){
   const btn = $("refreshBtn");
   btn.disabled = true; btn.textContent = "更新中…";
   try{
-    const before = S.prices.updatedAt;
+    const prev = await latestRunId("update.yml");
     const r = await gh(`/repos/${S.owner}/${S.repo}/actions/workflows/update.yml/dispatches`,
       { method:"POST", body: JSON.stringify({ref:"main"}) });
     if(!r.ok) throw new Error("起動失敗 ("+r.status+")");
-    toast("株価を取得しています(1分ほどかかります)");
-    for(let i=0;i<18;i++){
-      await new Promise(s=>setTimeout(s,8000));
-      try{
-        const p = await getFile("prices.json");
-        if(p.updatedAt !== before){
-          S.prices = p;
-          S.history = await getFile("history.json");
-          renderHome(); renderMeta(); toast("最新の株価に更新しました");
-          btn.disabled=false; btn.textContent="↻ 最新に更新"; return;
-        }
-      }catch(e){}
-      btn.textContent = "更新中… "+(i+1)*8+"秒";
+    toast("株価を取得しています");
+    const ok = await waitForWorkflow("update.yml", prev, 420, s=>btn.textContent="更新中… "+s+"秒");
+    if(ok === true){
+      S.prices = await getFile("prices.json");
+      S.history = await getFile("history.json");
+      S.stockPrices = null;
+      renderHome(); renderMeta(); toast("最新の株価に更新しました");
+    } else if(ok === false){
+      toast("更新処理がエラーで終了しました。GitHubのActionsログをご確認ください");
+    } else {
+      toast("時間内に完了を確認できませんでした。しばらくして開き直してください");
     }
-    toast("時間内に完了しませんでした。しばらくして開き直してください");
   }catch(e){ toast("更新に失敗: "+e.message); }
   btn.disabled=false; btn.textContent="↻ 最新に更新";
 }
@@ -1112,6 +1273,7 @@ $("unlockBtn").onclick = async ()=>{
     sessionStorage.setItem("kabu_tok", S.token);
     $("lock").classList.add("hidden");
     show("home");
+    checkPatExpiry();
   }catch(e){
     $("lockErr").textContent = e.message.includes("読込失敗")
       ? "接続できません。ユーザー名・リポジトリ名・トークンをご確認ください" : e.message;
@@ -1119,7 +1281,7 @@ $("unlockBtn").onclick = async ()=>{
 };
 $("resetCfg").onclick = resetAll;
 $("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("unlockBtn").click(); });
-document.getElementById("verLine").textContent = `アプリ v${APP_VERSION}(${APP_DATE.replace(/-/g,"/")} 更新)`;
+document.getElementById("hVer").textContent = `v${APP_VERSION}(${APP_DATE.replace(/-/g,"/")})`;
 document.getElementById("verNote2").textContent = `アプリ v${APP_VERSION}(${APP_DATE} 更新)・ `;
 resetInputForm();
 boot();
