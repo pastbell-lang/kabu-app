@@ -135,7 +135,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="card"><div class="lbl">年初来</div><div class="val num" id="hYDiff">—</div><div class="s num" id="hYDiffPct"></div></div>
       <div class="card"><div class="lbl">実現損益 累計</div><div class="val num" id="hGain">—</div><div class="s">キャピタルGain</div></div>
     </div>
-    <div class="seg" id="sortSeg" style="margin:16px 0 0">
+    <h2>口座別損益(保有株)</h2>
+    <div class="cards" id="acctCards"></div>
+    <p class="note num" id="lcNote" style="margin:2px 2px 0"></p>
+    <div class="seg" id="sortSeg" style="margin:8px 0 0">
       <button data-m="def" class="on">登録順</button><button data-m="pl">損益率順</button><button data-m="day">前日比順</button>
     </div>
     <h2 id="hTitleJp">保有株(日本株)</h2>
@@ -327,7 +330,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "3.5";
+const APP_VERSION = "3.6";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -632,6 +635,22 @@ function renderHome(){
         <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div>${extNote}</div>`;
   };
   const lcr = currentLcRate();
+  // 口座別損益(SBI = SBI日+SBI米 / moomoo)
+  const acctPl = { "SBI": {pl:0, n:0}, "moomoo": {pl:0, n:0} };
+  open.forEach(t=>{
+    const g = t.account==="moomoo" ? "moomoo" : "SBI";
+    const v = plOf(t);
+    if(v!=null){ acctPl[g].pl += v; acctPl[g].n++; }
+  });
+  $("acctCards").innerHTML = ["SBI","moomoo"].map(g=>{
+    const a = acctPl[g];
+    return `<div class="card"><div class="lbl">${g} 損益(保有)</div>
+      <div class="val num ${cls(a.pl)}">${a.n? sign(a.pl) : "—"}</div>
+      <div class="s num">${a.n}銘柄</div></div>`;
+  }).join("");
+  const lcMode = S.settings.lcMode || "fixed";
+  $("lcNote").textContent = `LCライン ${(lcr*100).toFixed(1)}%` +
+    (lcMode==="fixed" ? "(固定・設定画面で変更可)" : `(${lcMode}の限界率に連動)`);
   const sortKey = t => {
     const p = priceOf(t);
     if(S.sortMode==="pl") return (p!=null && t.entryPrice)? (p/t.entryPrice-1) : -1e9;
