@@ -157,7 +157,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     <div class="card"><table class="kv" id="dTable"></table></div>
     <div id="dChartWrap" class="hidden" style="margin-top:10px">
       <canvas id="dChart" width="1040" height="300"></canvas>
-      <p class="note" style="margin:4px 2px 0">取得日からの終値推移。点線=取得単価、赤点線=LC(5%)ライン</p>
+      <p class="note" style="margin:4px 2px 0">取得日からの終値推移。点線=取得単価、赤点線=LCライン(設定画面で率を変更可)</p>
     </div>
     <h2>売却(exit)を入力</h2>
     <div class="card">
@@ -255,6 +255,21 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       </div>
       <div style="margin-top:14px"><button class="primary" onclick="saveSettings()">保存する</button></div>
     </div>
+    <h2>LC(ロスカット)ライン</h2>
+    <div class="card">
+      <label>率の決め方</label>
+      <select id="lcMode" onchange="lcModeChanged()">
+        <option value="fixed">固定率を指定</option>
+        <option value="通算">通算の限界率に連動</option>
+        <option value="直近1カ月">直近1カ月の限界率に連動</option>
+        <option value="清算済">清算済の限界率に連動</option>
+        <option value="保有">保有の限界率に連動</option>
+      </select>
+      <label>固定率(%) ※連動時は限界率が「—」の場合の予備値</label>
+      <input type="number" inputmode="decimal" step="0.1" min="0.1" max="50" id="lcRate">
+      <p class="l2 num" id="lcNow" style="font-size:13px;margin:10px 2px 0"></p>
+      <div style="margin-top:12px"><button class="primary" onclick="saveLc()">保存する</button></div>
+    </div>
     <h2>銘柄マスター</h2>
     <div class="card">
       <p class="l2" id="masterInfo" style="font-size:13px;color:var(--sub)">—</p>
@@ -312,7 +327,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.5";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -474,6 +489,52 @@ $("rrModeSeg").querySelectorAll("button").forEach(b=>b.onclick=()=>{ S.rrMode=b.
 $("inCode").addEventListener("input", onCodeInput);
 $("inName").addEventListener("input", onNameInput);
 
+/* ---- LCライン率 ---- */
+function lcBasketList(name){
+  const all = S.trades.trades;
+  if(name==="直近1カ月"){
+    const cutoff = edateMinus1(new Date(S.prices.updatedAt));
+    return all.filter(t=>new Date(t.entryDate)>cutoff);
+  }
+  if(name==="清算済") return all.filter(t=>t.exitDate);
+  if(name==="保有") return all.filter(t=>!t.exitDate);
+  return all;   // 通算
+}
+function currentLcRate(){
+  const mode = S.settings.lcMode || "fixed";
+  const fixed = ((S.settings.lcRate ?? 5) || 5)/100;
+  if(mode === "fixed") return fixed;
+  const s0 = rrStats(lcBasketList(mode));
+  const mr = marginalRate(s0.rr, s0.win);
+  return mr==null ? fixed : mr;
+}
+function lcLabel(){
+  const mode = S.settings.lcMode || "fixed";
+  const r = (currentLcRate()*100).toFixed(1);
+  return mode==="fixed" ? `LC(${r}%)` : `LC(${mode} ${r}%)`;
+}
+function lcModeChanged(){
+  const mode = $("lcMode").value;
+  const fixed = parseFloat($("lcRate").value)||5;
+  let txt;
+  if(mode==="fixed") txt = `現在のLC率: ${fixed.toFixed(1)}%`;
+  else{
+    const s0 = rrStats(lcBasketList(mode));
+    const mr = marginalRate(s0.rr, s0.win);
+    txt = mr==null ? `現在のLC率: ${fixed.toFixed(1)}%(${mode}の限界率が「—」のため固定率を使用)`
+                   : `現在のLC率: ${(mr*100).toFixed(1)}%(${mode}の限界率)`;
+  }
+  $("lcNow").textContent = txt;
+}
+async function saveLc(){
+  S.settings.lcMode = $("lcMode").value;
+  S.settings.lcRate = parseFloat($("lcRate").value)||5;
+  try{
+    await putFile("settings.json", S.settings, "update lc settings");
+    lcModeChanged(); toast(`保存しました(現在のLC率 ${(currentLcRate()*100).toFixed(1)}%)`);
+  }catch(e){ toast("保存に失敗: "+e.message); }
+}
+
 /* ================= 画面制御 ================= */
 function show(name){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));
@@ -561,7 +622,7 @@ function renderHome(){
       ? `<div class="l2 num" style="margin-top:3px;font-size:11px">通常取引終値 ${sym}${fmt(sess.regular, u?2:1)}(${sess.phase==="pre"?"プレマーケット":"アフターマーケット"}で${(p-sess.regular>=0?"+":"−")+sym+fmt(Math.abs(p-sess.regular), u?2:1)})</div>` : "";
     return `<div class="row" onclick="openDetail(${t.id})" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="l1">${dispName(t)}<span class="tag">${t.account}</span>${(p!=null&&t.entryPrice&&p<t.entryPrice*0.95)?'<span class="lc">LC割れ</span>':''}</span>
+        <span class="l1">${dispName(t)}<span class="tag">${t.account}</span>${(p!=null&&t.entryPrice&&p<t.entryPrice*(1-lcr))?'<span class="lc">LC割れ</span>':''}</span>
         <span class="p num" style="font-weight:600">${badge}${cur}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
@@ -570,6 +631,7 @@ function renderHome(){
         <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
         <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div>${extNote}</div>`;
   };
+  const lcr = currentLcRate();
   const sortKey = t => {
     const p = priceOf(t);
     if(S.sortMode==="pl") return (p!=null && t.entryPrice)? (p/t.entryPrice-1) : -1e9;
@@ -632,7 +694,7 @@ async function openDetail(id){
     ["株数", fmt(t.qty,0)],
     ["評価額(円換算)", evalv==null?"—":yen(evalv)],
     ["評価損益(円換算)", pl==null?"—":`<span class="${cls(pl)}">${sign(pl)}</span>`],
-    ["LC(5%)ライン", (u?"$":"¥")+fmt(t.entryPrice*0.95)],
+    [lcLabel()+"ライン", (u?"$":"¥")+fmt(t.entryPrice*(1-currentLcRate()))],
     ["保有日数", days+"日"],
     ["点数", t.score??"—"],
   ].map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("");
@@ -688,7 +750,8 @@ async function drawStockChart(t){
   const c = $("dChart"), ctx = c.getContext("2d");
   ctx.clearRect(0,0,c.width,c.height);
   const vals = pts.map(p=>p.v);
-  const lo = Math.min(...vals, t.entryPrice*0.94), hi = Math.max(...vals, t.entryPrice*1.01);
+  const lcr = currentLcRate();
+  const lo = Math.min(...vals, t.entryPrice*(1-lcr-0.01)), hi = Math.max(...vals, t.entryPrice*1.01);
   const pad = 46;
   const X = i => pad + (c.width-2*pad)*i/(pts.length-1);
   const Y = v => c.height-pad - (c.height-2*pad)*(v-lo)/((hi-lo)||1);
@@ -697,7 +760,7 @@ async function drawStockChart(t){
   ctx.strokeStyle="#9A9CA6"; ctx.lineWidth=1.2;
   ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice)); ctx.lineTo(c.width-pad,Y(t.entryPrice)); ctx.stroke();
   ctx.strokeStyle="#C2402F";
-  ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice*0.95)); ctx.lineTo(c.width-pad,Y(t.entryPrice*0.95)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice*(1-lcr))); ctx.lineTo(c.width-pad,Y(t.entryPrice*(1-lcr))); ctx.stroke();
   ctx.setLineDash([]);
   // 終値ライン
   ctx.strokeStyle="#2E3A59"; ctx.lineWidth=3; ctx.beginPath();
@@ -769,7 +832,9 @@ function renderRR(){
     const s = rrStats(list), mr = marginalRate(s.rr, s.win);
     return `<div class="card"><div class="lbl">${lbl}RR比率</div>
       <div class="val num ${s.rr!=null&&s.rr>=1?"pos":"neg"}">${s.rr==null?"—":s.rr.toFixed(2)}</div>
-      <div class="s num">勝率 ${s.win==null?"—":(s.win*100).toFixed(1)}% ・ ${s.n}件<br>${sub} ・ 限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</div></div>`;
+      <div class="s num">勝率 ${s.win==null?"—":(s.win*100).toFixed(1)}% ・ ${s.n}件</div>
+      <div class="s num" style="color:var(--ink);font-weight:600">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</div>
+      <div class="s">${sub}</div></div>`;
   }).join("");
   const map = new Map();
   all.forEach(t=>{ const k=t.entryDate.slice(0,7); (map.get(k)??map.set(k,[]).get(k)).push(t); });
@@ -779,11 +844,15 @@ function renderRR(){
     const s = rrStats(map.get(m));
     const w = s.rr==null?0:Math.min(s.rr/maxRR,1)*100;
     const col = s.rr!=null&&s.rr>=1 ? "var(--up)":"var(--down)";
+    const mr = marginalRate(s.rr, s.win);
     return `<div class="row" onclick="openMonth('${m}')" style="gap:10px">
       <span class="num" style="font-size:13px;width:62px">${m.replace("-","/")}</span>
       <span class="bar"><i style="width:${w}%;background:${col}"></i></span>
       <span class="num" style="font-size:13px;width:38px;text-align:right">${s.rr==null?"—":s.rr.toFixed(2)}</span>
-      <span class="num" style="font-size:11px;color:var(--sub);width:72px;text-align:right">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}</span></div>`;
+      <span style="width:80px;text-align:right">
+        <span class="num" style="font-size:11px;color:var(--sub);display:block">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}</span>
+        <span class="num" style="font-size:11px;display:block">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</span>
+      </span></div>`;
   }).join("");
 }
 function renderRealized(){
@@ -969,6 +1038,9 @@ function renderSettings(){
   $("cashMooJpy").value = c["moomoo"]?.jpy ?? 0;
   $("cashMooUsd").value = c["moomoo"]?.usd ?? 0;
   $("patExp").value = localStorage.getItem("kabu_pat_exp")||"";
+  $("lcMode").value = S.settings.lcMode || "fixed";
+  $("lcRate").value = S.settings.lcRate ?? 5;
+  lcModeChanged();
   ensureMaster().then(()=>{
     const m = S.master||{};
     $("masterInfo").textContent =
