@@ -339,10 +339,39 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
         <button class="ghost" onclick="exportClosesCsv()">銘柄終値を書き出し</button>
         <button class="ghost" onclick="$('impCloses').click()">銘柄終値を取り込み</button>
       </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportFlowsCsv()">入出金を書き出し</button>
+        <button class="ghost" onclick="$('impFlows').click()">入出金を取り込み</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportRiskCsv()">限界リスク表を書き出し</button>
+        <button class="ghost" onclick="$('impRisk').click()">限界リスク表を取り込み</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportSettingsCsv()">設定値を書き出し</button>
+        <button class="ghost" onclick="$('impSet').click()">設定値を取り込み</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <button class="ghost" onclick="exportMasterCsv()">銘柄マスターを書き出し</button>
+        <button class="ghost" onclick="$('impMaster').click()">銘柄マスターを取り込み</button>
+      </div>
       <input type="file" id="impTrades" accept=".csv,text/csv" class="hidden" onchange="importTradesCsv(this)">
       <input type="file" id="impHist" accept=".csv,text/csv" class="hidden" onchange="importHistoryCsv(this)">
       <input type="file" id="impCloses" accept=".csv,text/csv" class="hidden" onchange="importClosesCsv(this)">
+      <input type="file" id="impFlows" accept=".csv,text/csv" class="hidden" onchange="importFlowsCsv(this)">
+      <input type="file" id="impRisk" accept=".csv,text/csv" class="hidden" onchange="importRiskCsv(this)">
+      <input type="file" id="impSet" accept=".csv,text/csv" class="hidden" onchange="importSettingsCsv(this)">
+      <input type="file" id="impMaster" accept=".csv,text/csv" class="hidden" onchange="importMasterCsv(this)">
       <p class="note" style="margin:10px 0 0">書き出しと取り込みは同一形式(編集可能なCSV・UTF-8)。取り込みは既存データを丸ごと置き換えます。事前に書き出して控えを残すことをおすすめします。</p>
+    </div>
+    <p class="subhead">一括バックアップ / リストア</p>
+    <div class="card">
+      <div class="grid2">
+        <button class="ghost" onclick="backupAll()">全データをバックアップ</button>
+        <button class="ghost" onclick="$('impBackup').click()">バックアップから復元</button>
+      </div>
+      <input type="file" id="impBackup" accept=".json,application/json" class="hidden" onchange="restoreAll(this)">
+      <p class="note" style="margin:8px 0 0">全8ファイル(トレード・履歴・設定・限界リスク表・終値台帳・銘柄マスター・株価・通知状態)を1つのファイルに保存/復元します。復元は全データを置き換えます。</p>
     </div>
     <p class="subhead">終値の再取得</p>
     <div class="card">
@@ -384,7 +413,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.5";
+const APP_VERSION = "4.7";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1127,9 +1156,13 @@ function openMonth(m, mode="entry"){
     .sort((a,b)=>a.entryDate<b.entryDate?1:-1);
   $("mTitle").textContent = `${m.replace("-","/")} ${mode==="exit"?"売却":"エントリー"}のトレード(${list.length}件)`;
   $("mList").innerHTML = list.map(t=>{
-    const pl = plOf(t);
-    return `<div class="row"><div><div class="l1">${dispName(t)}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
-      <div class="l2 num">${t.entryDate} → ${t.exitDate??"—"}</div></div>
+    const pl = plOf(t), u = USD(t.account), sym = u?"$":"¥";
+    const extra = [ (t.score!=null && t.score!=="") ? `点数 ${t.score}` : null, t.memo || null ]
+      .filter(Boolean).join(" ・ ");
+    return `<div class="row" ${t.exitDate?"":`onclick="openDetail(${t.id})"`}><div>
+      <div class="l1">${dispName(t)}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
+      <div class="l2 num">${t.entryDate} ${sym}${fmt(t.entryPrice)} → ${t.exitDate??"保有中"}${t.exitDate&&t.exitPrice?" "+sym+fmt(t.exitPrice):""}</div>
+      ${extra?`<div class="l2" style="margin-top:2px">${extra}</div>`:""}</div>
       <div class="r"><div class="p num ${pl==null?"":cls(pl)}">${pl==null?"—":sign(pl)}</div></div></div>`;
   }).join("");
   show("month");
@@ -1485,6 +1518,189 @@ async function refetchCloses(){
     }
   }catch(e){ toast("再取得に失敗: "+e.message); }
   btn.disabled=false; btn.textContent="再取得を実行";
+}
+
+/* ---- 入出金CSV (date,account,currency,amount) ---- */
+const CF_COLS = ["date","account","currency","amount"];
+function exportFlowsCsv(){
+  const fl = S.settings.cashflows || [];
+  downloadCsv(toCsv(fl, CF_COLS), "cashflows_export.csv");
+  toast(`入出金${fl.length}件を書き出しました`);
+}
+async function importFlowsCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input)); input.value="";
+    const head = rows.shift();
+    if(!head || head.join(",")!==CF_COLS.join(",")) return toast("列名が形式と一致しません(date,account,currency,amount)");
+    const out=[], errs=[];
+    rows.forEach((r,i)=>{
+      const [d,a,c,amt]=[r[0]??"",(r[1]??"").trim(),(r[2]??"").trim(),numOr(r[3])];
+      const line=i+2;
+      if(!isDate(d)) return errs.push(`${line}行目: dateが不正`);
+      if(!["SBI","moomoo"].includes(a)) return errs.push(`${line}行目: accountはSBI/moomoo`);
+      if(!["jpy","usd"].includes(c)) return errs.push(`${line}行目: currencyはjpy/usd`);
+      if(!(amt) || isNaN(amt)) return errs.push(`${line}行目: amountが不正(0以外の数値)`);
+      out.push({date:d,account:a,currency:c,amount:amt});
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    out.sort((a,b)=>a.date<b.date?-1:1);
+    if(!confirm(`入出金の記録${(S.settings.cashflows||[]).length}件を、CSVの${out.length}件で置き換えます(余力残高は変更しません)。よろしいですか?`)) return;
+    S.settings.cashflows = out;
+    await putFile("settings.json", S.settings, "import cashflows csv");
+    renderSettings(); renderHome(); toast(`入出金${out.length}件を取り込みました`);
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 限界リスク表CSV (行=RR、列=勝率の行列) ---- */
+function exportRiskCsv(){
+  const cols = ["rr_win", ...S.risk.winKeys.map(String)];
+  const rows = S.risk.rrKeys.map((rk,i)=>{
+    const o = {rr_win: rk};
+    S.risk.winKeys.forEach((wk,j)=>o[String(wk)] = S.risk.values[i][j] ?? "");
+    return o;
+  });
+  downloadCsv(toCsv(rows, cols), "marginal_risk_export.csv");
+  toast(`限界リスク表(${S.risk.rrKeys.length}×${S.risk.winKeys.length})を書き出しました`);
+}
+async function importRiskCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input)); input.value="";
+    const head = rows.shift();
+    if(!head || head[0]!=="rr_win") return toast("形式不一致: 先頭列は rr_win");
+    const winKeys = head.slice(1).map(Number);
+    if(!winKeys.length || winKeys.some(isNaN)) return toast("勝率の列見出しが数値ではありません");
+    const rrKeys=[], values=[], errs=[];
+    rows.forEach((r,i)=>{
+      const rk = numOr(r[0]);
+      if(rk===null||isNaN(rk)) return errs.push(`${i+2}行目: RRキーが不正`);
+      rrKeys.push(rk);
+      values.push(head.slice(1).map((_,j)=>{
+        const v = numOr(r[j+1]);
+        if(v!==null && isNaN(v)) errs.push(`${i+2}行目: 値が不正`);
+        return (v===null||isNaN(v)) ? null : v;
+      }));
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!rrKeys.length) return toast("有効な行がありません");
+    if(!confirm(`限界リスク表を ${rrKeys.length}×${winKeys.length} の表で置き換えます。LC率・RR分析の限界率に即反映されます。よろしいですか?`)) return;
+    S.risk = {winKeys, rrKeys, values};
+    await putFile("marginal_risk.json", S.risk, "import risk csv");
+    renderHome(); toast("限界リスク表を取り込みました");
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 設定値CSV (key,value) ---- */
+const SET_KEYS = ["cash.SBI.jpy","cash.SBI.usd","cash.moomoo.jpy","cash.moomoo.usd",
+                  "lcMode","lcRate","lcAlert","capitalGainOffset"];
+function exportSettingsCsv(){
+  const c = cashOf();
+  const kv = {
+    "cash.SBI.jpy": c.SBI?.jpy??0, "cash.SBI.usd": c.SBI?.usd??0,
+    "cash.moomoo.jpy": c.moomoo?.jpy??0, "cash.moomoo.usd": c.moomoo?.usd??0,
+    "lcMode": S.settings.lcMode||"fixed", "lcRate": S.settings.lcRate??5,
+    "lcAlert": S.settings.lcAlert?"true":"false",
+    "capitalGainOffset": S.settings.capitalGainOffset??0,
+  };
+  downloadCsv(toCsv(SET_KEYS.map(k=>({key:k,value:kv[k]})), ["key","value"]), "settings_export.csv");
+  toast("設定値を書き出しました");
+}
+async function importSettingsCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input)); input.value="";
+    const head = rows.shift();
+    if(!head || head.join(",")!=="key,value") return toast("列名が形式と一致しません(key,value)");
+    const kv = Object.fromEntries(rows.map(r=>[r[0], r[1]]));
+    const errs = [];
+    const num = k => { const v=numOr(kv[k]); if(v===null||isNaN(v)) errs.push(`${k} が数値ではありません`); return v; };
+    const cash = {SBI:{jpy:num("cash.SBI.jpy"),usd:num("cash.SBI.usd")},
+                  moomoo:{jpy:num("cash.moomoo.jpy"),usd:num("cash.moomoo.usd")}};
+    const lcMode = kv["lcMode"];
+    if(!["fixed","通算","直近1カ月","清算済","保有"].includes(lcMode)) errs.push("lcMode が不正");
+    const lcRate = num("lcRate"); const offset = num("capitalGainOffset");
+    const lcAlert = kv["lcAlert"]==="true" ? true : kv["lcAlert"]==="false" ? false : (errs.push("lcAlert はtrue/false"), false);
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!confirm("設定値(余力・LC設定・オフセット)をCSVの内容で置き換えます。よろしいですか?")) return;
+    Object.assign(S.settings, {cash, lcMode, lcRate, lcAlert, capitalGainOffset: offset});
+    const t = cashTotals(); S.settings.cashJpy=t.jpy; S.settings.cashUsd=t.usd;
+    await putFile("settings.json", S.settings, "import settings csv");
+    renderSettings(); renderHome(); toast("設定値を取り込みました");
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 銘柄マスターCSV (market,code,name) ---- */
+function exportMasterCsv(){
+  ensureMaster().then(()=>{
+    const rows = [
+      ...(S.master.jp||[]).map(([c,n])=>({market:"jp",code:c,name:n})),
+      ...(S.master.us||[]).map(([c,n])=>({market:"us",code:c,name:n})),
+    ];
+    downloadCsv(toCsv(rows, ["market","code","name"]), "master_export.csv");
+    toast(`銘柄マスター${rows.length}件を書き出しました`);
+  });
+}
+async function importMasterCsv(input){
+  try{
+    const rows = parseCsv(await readFile(input)); input.value="";
+    const head = rows.shift();
+    if(!head || head.join(",")!=="market,code,name") return toast("列名が形式と一致しません(market,code,name)");
+    const jp=[], us=[], errs=[];
+    rows.forEach((r,i)=>{
+      const [m,c,n]=[(r[0]??"").trim(),(r[1]??"").trim(),(r[2]??"").trim()];
+      if(!["jp","us"].includes(m)) return errs.push(`${i+2}行目: marketはjp/us`);
+      if(!c) return errs.push(`${i+2}行目: codeが空`);
+      (m==="jp"?jp:us).push([c, n||c]);
+    });
+    if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
+    if(!jp.length && !us.length) return toast("有効な行がありません");
+    if(!confirm(`銘柄マスターを 日本株${jp.length}件 / 米国株${us.length}件 で置き換えます。よろしいですか?`)) return;
+    const m = {updatedAt: new Date().toISOString().slice(0,19)+"+09:00 (CSV取込)",
+               jp: jp.sort((a,b)=>a[0]<b[0]?-1:1), us: us.sort((a,b)=>a[0]<b[0]?-1:1)};
+    S.shas["master.json"] = await shaOfData("master.json").catch(()=>undefined);
+    await putFile("master.json", m, "import master csv");
+    S.master = m; renderSettings(); toast("銘柄マスターを取り込みました");
+  }catch(e){ toast("取り込み失敗: "+e.message); }
+}
+
+/* ---- 一括バックアップ / リストア ---- */
+const BK_FILES = ["trades.json","history.json","settings.json","marginal_risk.json",
+                  "stock_prices.json","master.json","prices.json","alert_state.json"];
+async function backupAll(){
+  try{
+    toast("バックアップを作成しています…");
+    const files = {};
+    for(const f of BK_FILES){
+      try{ files[f] = await getRaw(f); }
+      catch(e){ files[f] = null; }
+    }
+    const bk = { app:"kabu", version: APP_VERSION, exportedAt: new Date().toISOString(), files };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(bk)],{type:"application/json"}));
+    a.download = `kabu_backup_${localDate(new Date()).replace(/-/g,"")}.json`;
+    a.click();
+    toast("バックアップを書き出しました");
+  }catch(e){ toast("バックアップ失敗: "+e.message); }
+}
+async function restoreAll(input){
+  try{
+    const bk = JSON.parse(await readFile(input)); input.value="";
+    if(bk.app!=="kabu" || !bk.files) return toast("バックアップファイルの形式ではありません");
+    const tr = bk.files["trades.json"], hi = bk.files["history.json"];
+    if(!tr?.trades || !Array.isArray(tr.trades) || !hi?.history) return toast("必須データ(トレード/履歴)が欠けています");
+    const summary = `トレード${tr.trades.length}件 / 履歴${hi.history.length}行 / 作成 ${String(bk.exportedAt).slice(0,16).replace("T"," ")}`;
+    if(!confirm(`バックアップの内容で全データを置き換えます。\n${summary}\nよろしいですか?`)) return;
+    let done = 0;
+    for(const f of BK_FILES){
+      if(bk.files[f] == null) continue;
+      S.shas[f] = await shaOfData(f).catch(()=>undefined);
+      await putFile(f, bk.files[f], "restore from backup");
+      done++;
+      toast(`復元中… ${done}/${BK_FILES.filter(x=>bk.files[x]!=null).length}`);
+    }
+    await loadAll();
+    S.stockPrices = null; S.master = null; _spDates = null;
+    renderHome(); renderMeta(); renderSettings();
+    toast(`復元が完了しました(${done}ファイル)`);
+  }catch(e){ toast("復元失敗: "+e.message); }
 }
 
 /* ---- 損益履歴 ---- */
