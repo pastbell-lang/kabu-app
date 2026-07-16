@@ -180,7 +180,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
   <section id="scr-rr" class="screen">
     <div class="seg" id="rrModeSeg" style="margin-bottom:12px">
-      <button data-m="rr" class="on">RR分析</button><button data-m="pl">実現損益</button>
+      <button data-m="rr" class="on">RR分析</button><button data-m="pl">月次損益</button>
     </div>
     <div id="rrView">
       <div class="cards" id="rrCards"></div>
@@ -190,9 +190,9 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     </div>
     <div id="plView" class="hidden">
       <div class="cards" id="plCards"></div>
-      <h2>実現損益(exit月別)</h2>
+      <h2>月次損益(時価ベース)</h2>
       <div class="list" id="plMonths"></div>
-      <p class="note">清算済みトレードの損益を売却日の月で集計(米ドル口座は現在レートで円換算)。年の行は年間合計。</p>
+      <p class="note">各月の損益 = 前月末終値→当月末終値(当月は最新値、月中の売買は約定価格)の差分×株数。米ドル口座は現在レートで円換算。全月の合計は総損益と一致します。月をタップで銘柄別の内訳へ。</p>
     </div>
   </section>
 
@@ -368,7 +368,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.2";
+const APP_VERSION = "4.3";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -994,40 +994,116 @@ function renderRR(){
       </span></div>`;
   }).join("");
 }
-function renderRealized(){
-  const closed = S.trades.trades.filter(t=>t.exitDate && plOf(t)!=null);
-  const byM = new Map();
-  closed.forEach(t=>{
-    const k = t.exitDate.slice(0,7);
-    if(!byM.has(k)) byM.set(k, []);
-    byM.get(k).push(t);
-  });
-  const months = [...byM.keys()].sort().reverse();
-  const sum = list => list.reduce((a,t)=>a+plOf(t), 0);
-  // 上部カード: 今年・累計
-  const thisYear = String(new Date().getFullYear());
-  const yearSum = closed.filter(t=>t.exitDate.startsWith(thisYear));
-  const allSum = sum(closed) + (S.settings.capitalGainOffset||0);
-  $("plCards").innerHTML =
-    `<div class="card"><div class="lbl">${thisYear}年 実現損益</div><div class="val num ${cls(sum(yearSum))}">${sign(sum(yearSum))}</div><div class="s num">${yearSum.length}トレード</div></div>` +
-    `<div class="card"><div class="lbl">実現損益 累計</div><div class="val num ${cls(allSum)}">${sign(allSum)}</div><div class="s">キャピタルGain(移行分含む)</div></div>`;
-  // 年見出し+月行
-  let html = "", curYear = "";
+function monthEndStr(m){          // "YYYY-MM" → 月末日 "YYYY-MM-DD"
+  const [y,mo] = m.split("-").map(Number);
+  return `${y}-${String(mo).padStart(2,"0")}-${String(new Date(y,mo,0).getDate()).padStart(2,"0")}`;
+}
+function prevMonthEndStr(m){
+  const [y,mo] = m.split("-").map(Number);
+  const d = new Date(y, mo-1, 0);   // 前月末
+  return localDate(d);
+}
+let _spDates = null;
+function priceOnOrBefore(code, dateStr){
+  const by = S.stockPrices?.byDate || {};
+  if(!_spDates) _spDates = Object.keys(by).sort();
+  for(let i=_spDates.length-1; i>=0; i--){
+    const d = _spDates[i];
+    if(d > dateStr) continue;
+    const v = by[d][String(code)];
+    if(v != null) return v;
+  }
+  return null;
+}
+// トレードtの月mにおける損益スライス(円換算)。対象外はnull
+function monthSlice(t, m, fx, curMonth){
+  const first = m+"-01", last = monthEndStr(m);
+  if(!t.entryDate || t.entryDate > last) return null;
+  if(t.exitDate && t.exitDate < first) return null;
+  const u = USD(t.account);
+  let startP, endP;
+  if(t.entryDate >= first) startP = t.entryPrice;
+  else startP = priceOnOrBefore(t.code, prevMonthEndStr(m)) ?? t.entryPrice;
+  if(t.exitDate && t.exitDate <= last) endP = t.exitPrice;
+  else if(m === curMonth) endP = (S.prices.prices[String(t.code)] ?? priceOnOrBefore(t.code, last)) ?? startP;
+  else endP = priceOnOrBefore(t.code, last) ?? startP;
+  if(startP == null || endP == null || !t.qty) return null;
+  const v = (endP - startP) * t.qty;
+  return { pl: u ? v*fx : v, startP, endP };
+}
+async function renderRealized(){
+  $("plMonths").innerHTML = `<div class="row"><span class="l2">計算中…</span></div>`;
+  await ensureStockPrices();
+  _spDates = null;
+  const fx = S.prices.usdjpy;
+  const curMonth = localDate(new Date()).slice(0,7);
+  const all = S.trades.trades;
+  // 対象月: 最初のエントリー月〜当月
+  const firstM = all.reduce((a,t)=>t.entryDate && t.entryDate.slice(0,7)<a ? t.entryDate.slice(0,7) : a, curMonth);
+  const months = [];
+  for(let m = firstM; m <= curMonth; ){
+    months.push(m);
+    const [y,mo] = m.split("-").map(Number);
+    m = mo===12 ? `${y+1}-01` : `${y}-${String(mo+1).padStart(2,"0")}`;
+  }
+  const perMonth = new Map();
   months.forEach(m=>{
+    let sum = 0, n = 0;
+    all.forEach(t=>{
+      const sl = monthSlice(t, m, fx, curMonth);
+      if(sl){ sum += sl.pl; n++; }
+    });
+    if(n) perMonth.set(m, {sum, n});
+  });
+  const shown = [...perMonth.keys()].sort().reverse();
+  // 上部カード: 今年の損益(スライス合算) と 実現損益累計
+  const thisYear = curMonth.slice(0,4);
+  const ySum = shown.filter(m=>m.startsWith(thisYear)).reduce((a,m)=>a+perMonth.get(m).sum, 0);
+  let realized = 0;
+  all.forEach(t=>{ if(t.exitDate){ const v = plOf(t); if(v!=null) realized += v; } });
+  const allSum = realized + (S.settings.capitalGainOffset||0);
+  $("plCards").innerHTML =
+    `<div class="card"><div class="lbl">${thisYear}年 損益(時価)</div><div class="val num ${cls(ySum)}">${sign(ySum)}</div><div class="s">含み損益の増減を含む</div></div>` +
+    `<div class="card"><div class="lbl">実現損益 累計</div><div class="val num ${cls(allSum)}">${sign(allSum)}</div><div class="s">キャピタルGain(移行分含む)</div></div>`;
+  let html = "", curYear = "";
+  shown.forEach(m=>{
     const y = m.slice(0,4);
     if(y !== curYear){
       curYear = y;
-      const ySum = sum(closed.filter(t=>t.exitDate.startsWith(y)));
-      const yN = closed.filter(t=>t.exitDate.startsWith(y)).length;
+      const ys = shown.filter(x=>x.startsWith(y)).reduce((a,x)=>a+perMonth.get(x).sum, 0);
       html += `<div class="row" style="background:var(--bg)"><span class="l1 num" style="font-weight:600">${y}年</span>
-        <span class="p num ${cls(ySum)}" style="font-weight:600">${sign(ySum)} <span class="tag">${yN}件</span></span></div>`;
+        <span class="p num ${cls(ys)}" style="font-weight:600">${sign(ys)}</span></div>`;
     }
-    const list = byM.get(m), v = sum(list);
-    html += `<div class="row" onclick="openMonth('${m}','exit')">
-      <span class="l1 num" style="padding-left:12px">${m.replace("-","/")}</span>
-      <span class="p num ${cls(v)}">${sign(v)} <span class="tag">${list.length}件</span></span></div>`;
+    const v = perMonth.get(m);
+    html += `<div class="row" onclick="openPlMonth('${m}')">
+      <span class="l1 num" style="padding-left:12px">${m.replace("-","/")}${m===curMonth?' <span class="tag">進行中</span>':''}</span>
+      <span class="p num ${cls(v.sum)}">${sign(v.sum)} <span class="tag">${v.n}銘柄</span></span></div>`;
   });
-  $("plMonths").innerHTML = html || `<div class="row"><div class="l2">清算済みトレードがありません</div></div>`;
+  $("plMonths").innerHTML = html || `<div class="row"><div class="l2">データがありません</div></div>`;
+}
+async function openPlMonth(m){
+  await ensureStockPrices();
+  const fx = S.prices.usdjpy;
+  const curMonth = localDate(new Date()).slice(0,7);
+  const items = [];
+  S.trades.trades.forEach(t=>{
+    const sl = monthSlice(t, m, fx, curMonth);
+    if(sl) items.push({t, ...sl});
+  });
+  items.sort((a,b)=>b.pl-a.pl);
+  $("mTitle").textContent = `${m.replace("-","/")} の月次損益(${items.length}銘柄)`;
+  $("mList").innerHTML = items.map(({t,pl,startP,endP})=>{
+    const u = USD(t.account), sym = u?"$":"¥";
+    const tags = [t.account];
+    if(t.entryDate.slice(0,7)===m) tags.push("月中エントリー");
+    if(t.exitDate && t.exitDate.slice(0,7)===m) tags.push("月中売却");
+    else if(!t.exitDate && m===curMonth) tags.push("保有中");
+    return `<div class="row"><div><div class="l1">${dispName(t)}<span class="tag">${tags.join(" ・ ")}</span></div>
+      <div class="l2 num">${sym}${fmt(startP, u?2:1)} → ${sym}${fmt(endP, u?2:1)} × ${fmt(t.qty,0)}</div></div>
+      <div class="r"><div class="p num ${cls(pl)}">${sign(pl)}</div></div></div>`;
+  }).join("");
+  show("month");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="rr"));
 }
 function openMonth(m, mode="entry"){
   const list = S.trades.trades.filter(t=>
