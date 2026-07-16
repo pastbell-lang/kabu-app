@@ -87,6 +87,14 @@ table.kv td:last-child{text-align:right}
 .sug div{padding:10px 12px;font-size:14px;border-bottom:0.5px solid var(--line);display:flex;justify-content:space-between;gap:10px}
 .sug div:last-child{border-bottom:none}
 .sug .c{color:var(--sub);font-size:12px;flex-shrink:0}
+details.acc{margin:10px 0}
+details.acc>summary{list-style:none;cursor:pointer;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:14px 16px;font-size:15px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+details.acc>summary::-webkit-details-marker{display:none}
+details.acc>summary::after{content:"▸";color:var(--sub);transition:transform .15s}
+details.acc[open]>summary::after{transform:rotate(90deg)}
+details.acc>.card{margin-top:8px}
+.subhead{font-size:13px;font-weight:600;color:var(--sub);margin:14px 2px 6px}
 .warn{color:var(--warn)}
 .wtag{font-size:10px;font-weight:500;color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:1px 5px;vertical-align:2px;margin-right:6px}
 .lc{font-size:10px;font-weight:600;color:#fff;background:var(--down);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:1px}
@@ -249,7 +257,8 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
   </section>
 
   <section id="scr-settings" class="screen">
-    <h2>余力(現金)</h2>
+
+    <details class="acc"><summary>資産・余力</summary><p class="subhead">余力(現金)</p>
     <div class="card">
       <p class="l2" style="font-size:13px;color:var(--sub);margin:0 0 2px">SBI</p>
       <div class="grid2">
@@ -263,7 +272,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       </div>
       <div style="margin-top:14px"><button class="primary" onclick="saveSettings()">保存する</button></div>
     </div>
-    <h2>入出金の記録</h2>
+    <p class="subhead">入出金の記録</p>
     <div class="card">
       <div class="grid2">
         <div><label>日付</label><input type="date" id="cfDate"></div>
@@ -277,28 +286,8 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <div class="list" id="cfList" style="margin-top:10px"></div>
       <p class="note" style="margin:8px 0 0">記録すると前日差・前月差・年初来・月損益から入出金分が自動控除され、純粋な運用損益になります。</p>
     </div>
-    <h2>表示</h2>
-    <div class="card">
-      <div class="grid2">
-        <div><label>金額の単位</label>
-          <select id="dispUnit" onchange="localStorage.setItem('kabu_unit',this.value); renderHome(); toast('表示単位を変更しました')">
-            <option value="yen">円(¥53,601,447)</option><option value="man">万円(¥5,360万)</option>
-          </select></div>
-        <div><label>文字サイズ</label>
-          <select id="fontSize" onchange="localStorage.setItem('kabu_font',this.value); applyFontSize(); toast('文字サイズを変更しました')">
-            <option value="std">標準</option><option value="big">大きめ</option>
-          </select></div>
-      </div>
-    </div>
-    <h2>LC割れ通知</h2>
-    <div class="card">
-      <label>定時更新でLC割れを検知したらGitHubのIssueを作成(GitHubアプリでプッシュ通知)</label>
-      <select id="lcAlert" onchange="saveLcAlert(this.value)">
-        <option value="off">オフ(通知しない)</option><option value="on">オン</option>
-      </select>
-      <p class="note" style="margin:8px 0 0">通知を受け取るにはiPhoneにGitHubアプリを入れ、kabu-dataリポジトリをWatchしてください。</p>
-    </div>
-    <h2>LC(ロスカット)ライン</h2>
+    </details>
+<details class="acc"><summary>リスク管理(LCライン・通知)</summary><p class="subhead">LC(ロスカット)ライン</p>
     <div class="card">
       <label>率の決め方</label>
       <select id="lcMode" onchange="lcModeChanged()">
@@ -313,13 +302,30 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <p class="l2 num" id="lcNow" style="font-size:13px;margin:10px 2px 0"></p>
       <div style="margin-top:12px"><button class="primary" onclick="saveLc()">保存する</button></div>
     </div>
-    <h2>銘柄マスター</h2>
+    <p class="subhead">LC割れ通知</p>
     <div class="card">
-      <p class="l2" id="masterInfo" style="font-size:13px;color:var(--sub)">—</p>
-      <div style="margin-top:10px"><button class="ghost" id="masterBtn" onclick="updateMaster()">最新の銘柄情報に更新</button></div>
-      <p class="note" style="margin:8px 0 0">JPX(東証)とNASDAQ公式の上場銘柄一覧を取得してマスターを最新化します(1〜2分)。毎月2日にも自動更新されます。</p>
+      <label>定時更新でLC割れを検知したらGitHubのIssueを作成(GitHubアプリでプッシュ通知)</label>
+      <select id="lcAlert" onchange="saveLcAlert(this.value)">
+        <option value="off">オフ(通知しない)</option><option value="on">オン</option>
+      </select>
+      <p class="note" style="margin:8px 0 0">通知を受け取るにはiPhoneにGitHubアプリを入れ、kabu-dataリポジトリをWatchしてください。</p>
     </div>
-    <h2>データ(CSVエクスポート / 一括インポート)</h2>
+    </details>
+<details class="acc"><summary>画面表示</summary>
+    <div class="card">
+      <div class="grid2">
+        <div><label>金額の単位</label>
+          <select id="dispUnit" onchange="localStorage.setItem('kabu_unit',this.value); renderHome(); toast('表示単位を変更しました')">
+            <option value="yen">円(¥53,601,447)</option><option value="man">万円(¥5,360万)</option>
+          </select></div>
+        <div><label>文字サイズ</label>
+          <select id="fontSize" onchange="localStorage.setItem('kabu_font',this.value); applyFontSize(); toast('文字サイズを変更しました')">
+            <option value="std">標準</option><option value="big">大きめ</option>
+          </select></div>
+      </div>
+    </div>
+    </details>
+<details class="acc"><summary>データ管理(CSV・終値・銘柄マスター)</summary><p class="subhead">データ(CSVエクスポート / 一括インポート)</p>
     <div class="card">
       <div class="grid2">
         <button class="ghost" onclick="exportTradesCsv()">トレードを書き出し</button>
@@ -338,25 +344,33 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       <input type="file" id="impCloses" accept=".csv,text/csv" class="hidden" onchange="importClosesCsv(this)">
       <p class="note" style="margin:10px 0 0">書き出しと取り込みは同一形式(編集可能なCSV・UTF-8)。取り込みは既存データを丸ごと置き換えます。事前に書き出して控えを残すことをおすすめします。</p>
     </div>
-    <h2>終値の再取得</h2>
+    <p class="subhead">終値の再取得</p>
     <div class="card">
       <label>この日以降の銘柄終値をYahoo Financeから取り直して上書き</label>
       <input type="date" id="refetchFrom">
       <div style="margin-top:10px"><button class="ghost" id="refetchBtn" onclick="refetchCloses()">再取得を実行</button></div>
       <p class="note" style="margin:8px 0 0">配当調整なしの実際の終値で揃え直します(2〜5分)。細かな手直しは上の「銘柄終値」CSVで行えます。</p>
     </div>
-    <h2>アクセストークンの有効期限</h2>
+    <p class="subhead">銘柄マスター</p>
+    <div class="card">
+      <p class="l2" id="masterInfo" style="font-size:13px;color:var(--sub)">—</p>
+      <div style="margin-top:10px"><button class="ghost" id="masterBtn" onclick="updateMaster()">最新の銘柄情報に更新</button></div>
+      <p class="note" style="margin:8px 0 0">JPX(東証)とNASDAQ公式の上場銘柄一覧を取得してマスターを最新化します(1〜2分)。毎月2日にも自動更新されます。</p>
+    </div>
+    </details>
+<details class="acc"><summary>接続・セキュリティ</summary><p class="subhead">アクセストークンの有効期限</p>
     <div class="card">
       <label>期限日を登録しておくと、14日前から起動時に警告します</label>
       <input type="date" id="patExp" onchange="localStorage.setItem('kabu_pat_exp', this.value); toast('期限日を保存しました')">
     </div>
-    <h2>その他</h2>
+    <p class="subhead">その他</p>
     <div class="card">
       <div><button class="ghost" onclick="lockApp()">ロックする(パスワード再入力)</button></div>
       <div style="margin-top:8px"><button class="ghost danger" onclick="resetAll()">接続設定を消去(データは消えません)</button></div>
     </div>
     <p class="note" id="verNote"><span id="verNote2"></span>データはGitHub非公開リポジトリに保存されています。トークンはパスワードで暗号化されこの端末内にのみ保存されます。</p>
-  </section>
+  </details>
+</section>
 </main>
 
 <nav>
@@ -370,7 +384,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.4";
+const APP_VERSION = "4.5";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
