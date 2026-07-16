@@ -243,7 +243,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     <button class="back" id="hsBack">‹ 日別一覧</button>
     <h2 id="hsTitle"></h2>
     <div id="hsBody"></div>
-    <p class="note">株価はその日時点の記録(米国株はその朝時点の直近終値)。損益はその日の記録為替で円換算。</p>
+    <p class="note">株価はその日の終値(米国株は同じ日付の米国市場終値。当日分は翌朝の更新で確定値に自動訂正)。損益はその日の記録為替で円換算。</p>
   </section>
 
   <section id="scr-settings" class="screen">
@@ -368,7 +368,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.0";
+const APP_VERSION = "4.1";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
