@@ -368,7 +368,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.1";
+const APP_VERSION = "4.2";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1130,7 +1130,8 @@ async function ensureStockPrices(){
   catch(e){ S.stockPrices = {byDate:{}}; }
 }
 function heldOn(d){
-  return S.trades.trades.filter(t=>t.entryDate && t.entryDate<=d && (!t.exitDate || t.exitDate>d));
+  // 売却日当日はその銘柄を(売却価格で)一覧に残す
+  return S.trades.trades.filter(t=>t.entryDate && t.entryDate<=d && (!t.exitDate || t.exitDate>=d));
 }
 async function openHistDay(d){
   await ensureStockPrices();
@@ -1143,7 +1144,9 @@ async function openHistDay(d){
   const hold = heldOn(d);
   const row = t=>{
     const u = USD(t.account), sym = u?"$":"¥";
-    const p = map[String(t.code)] ?? null, pc = pmap[String(t.code)] ?? null;
+    const sold = t.exitDate === d;
+    const p = sold ? t.exitPrice : (map[String(t.code)] ?? null);
+    const pc = pmap[String(t.code)] ?? null;
     const pl = (p!=null && t.entryPrice!=null && t.qty) ? (p-t.entryPrice)*t.qty*(u?fx:1) : null;
     const pct = (p!=null && t.entryPrice) ? (p/t.entryPrice-1)*100 : null;
     const dv = (p!=null && pc) ? p-pc : null;
@@ -1151,13 +1154,13 @@ async function openHistDay(d){
     const dTxt = dv==null ? "前日 —" : `前日 ${(dv>=0?"+":"−")+fmt(Math.abs(dv), u?2:1)} (${(dv>=0?"+":"−")+Math.abs(dv/pc*100).toFixed(2)}%)`;
     return `<div class="row" style="display:block">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span class="l1">${dispName(t)}<span class="tag">${t.account}</span></span>
-        <span class="p num" style="font-weight:600">${p==null?"—":sym+fmt(p, u?2:1)}</span></div>
+        <span class="l1">${dispName(t)}<span class="tag">${t.account}${sold?" ・ この日売却":""}</span></span>
+        <span class="p num" style="font-weight:600">${p==null?"—":(sold?"売却 ":"")+sym+fmt(p, u?2:1)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px">
         <span class="l2 num">取得 ${sym}${fmt(t.entryPrice)} × ${fmt(t.qty,0)}</span>
         <span class="l2 num">前日終値 ${pc==null?"—":sym+fmt(pc, u?2:1)}</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:12px">
-        <span class="num ${pl==null?"":cls(pl)}">${plTxt}</span>
+        <span class="num ${pl==null?"":cls(pl)}">${sold?plTxt.replace("損益","確定損益"):plTxt}</span>
         <span class="num ${dv==null?"":cls(dv)}">${dTxt}</span></div></div>`;
   };
   const jp = hold.filter(t=>!USD(t.account)), us = hold.filter(t=>USD(t.account));
