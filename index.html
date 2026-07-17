@@ -423,7 +423,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.12";
+const APP_VERSION = "4.13";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1378,6 +1378,7 @@ function renderSettings(){
   $("fontSize").value = localStorage.getItem("kabu_font")||"std";
   $("lcAlert").value = S.settings.lcAlert ? "on" : "off";
   if(!$("cfDate").value) $("cfDate").value = localDate(new Date());
+  if(!$("refetchFrom").value) $("refetchFrom").value = localStorage.getItem("kabu_refetch_from") || "";
   const fl = S.settings.cashflows || [];
   $("cfMoreBtn").textContent = `入出金の履歴を見る(全${fl.length}件)`;
   $("cfList").innerHTML = fl.slice(-5).reverse().map((f,ri)=>{
@@ -1564,6 +1565,7 @@ async function importClosesCsv(input){
 async function refetchCloses(){
   const from = $("refetchFrom").value;
   if(!from) return toast("開始日を選んでください");
+  localStorage.setItem("kabu_refetch_from", from);   // 最後に記入した日付を記憶
   if(!confirm(`${from} 以降の銘柄終値をYahoo Financeから取り直して上書きします。よろしいですか?`)) return;
   const btn = $("refetchBtn");
   btn.disabled = true; btn.textContent = "再取得中…";
