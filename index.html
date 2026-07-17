@@ -249,6 +249,14 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     <div class="list" id="hdList"></div>
   </section>
 
+  <section id="scr-cashflow" class="screen">
+    <button class="back" onclick="show('settings')">‹ 設定</button>
+    <h2>入出金の履歴</h2>
+    <div class="cards" id="cfCards"></div>
+    <div class="list" id="cfAll"></div>
+    <p class="note">各行は入力どおりの通貨表記(+入金/−出金)。年・月・カードの合計は現在レートでの円換算。削除すると該当口座の余力も自動で戻ります。</p>
+  </section>
+
   <section id="scr-histstock" class="screen">
     <button class="back" id="hsBack">‹ 日別一覧</button>
     <h2 id="hsTitle"></h2>
@@ -284,6 +292,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
       </div>
       <div style="margin-top:12px"><button class="primary" onclick="addCashflow()">記録する(余力も自動更新)</button></div>
       <div class="list" id="cfList" style="margin-top:10px"></div>
+      <div style="margin-top:8px"><button class="ghost" id="cfMoreBtn" onclick="openCashflows()">入出金の履歴を見る</button></div>
       <p class="note" style="margin:8px 0 0">記録すると前日差・前月差・年初来・月損益から入出金分が自動控除され、純粋な運用損益になります。</p>
     </div>
     </details>
@@ -414,7 +423,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.11";
+const APP_VERSION = "4.12";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -676,8 +685,45 @@ async function delCashflow(i){
   const c = S.settings.cash;
   if(c && c[f.account]) c[f.account][f.currency] = (c[f.account][f.currency]||0) - f.amount;
   const t = cashTotals(); S.settings.cashJpy = t.jpy; S.settings.cashUsd = t.usd;
-  try{ await putFile("settings.json", S.settings, "delete cashflow"); renderSettings(); renderHome(); toast("削除しました"); }
-  catch(e){ toast("保存に失敗: "+e.message); }
+  try{
+    await putFile("settings.json", S.settings, "delete cashflow");
+    renderSettings(); renderHome(); toast("削除しました");
+    if($("scr-cashflow").classList.contains("on")) openCashflows();
+  }catch(e){ toast("保存に失敗: "+e.message); }
+}
+function openCashflows(){
+  const src = S.settings.cashflows || [];
+  const fl = [...src].sort((a,b)=>a.date<b.date?1:-1);   // 新しい順
+  const fx = S.prices.usdjpy;
+  const jpyOf = f => f.amount * (f.currency==="usd" ? fx : 1);
+  const thisYear = String(new Date().getFullYear());
+  const total = src.reduce((a,f)=>a+jpyOf(f),0);
+  const ySum = src.filter(f=>f.date.startsWith(thisYear)).reduce((a,f)=>a+jpyOf(f),0);
+  $("cfCards").innerHTML =
+    `<div class="card"><div class="lbl">${thisYear}年 純入出金</div><div class="val num ${cls(ySum)}">${sign(ySum)}</div><div class="s num">${src.filter(f=>f.date.startsWith(thisYear)).length}件</div></div>` +
+    `<div class="card"><div class="lbl">純入出金 累計</div><div class="val num ${cls(total)}">${sign(total)}</div><div class="s num">${src.length}件</div></div>`;
+  let html = "", curY = "", curM = "";
+  fl.forEach(f=>{
+    const y = f.date.slice(0,4), m = f.date.slice(0,7);
+    if(y !== curY){
+      curY = y;
+      const ys = src.filter(x=>x.date.startsWith(y)).reduce((a,x)=>a+jpyOf(x),0);
+      html += `<div class="row" style="background:var(--bg)"><span class="l1 num" style="font-weight:600">${y}年</span>
+        <span class="p num ${cls(ys)}" style="font-weight:600">${sign(ys)}</span></div>`;
+    }
+    if(m !== curM){
+      curM = m;
+      const ms = src.filter(x=>x.date.slice(0,7)===m).reduce((a,x)=>a+jpyOf(x),0);
+      html += `<div class="row"><span class="l2 num" style="padding-left:10px;font-weight:600">${m.replace("-","/")}</span>
+        <span class="l2 num ${cls(ms)}">${sign(ms)}</span></div>`;
+    }
+    const i = src.indexOf(f);
+    html += `<div class="row"><span class="l2 num" style="padding-left:20px">${f.date.slice(2)} ${f.account} <span class="${cls(f.amount)}">${f.currency==="usd"?"$":"¥"}${fmt(Math.abs(f.amount))} ${f.amount>0?"入金":"出金"}</span></span>
+      <button class="ghost danger" style="width:auto;padding:4px 10px;font-size:12px" onclick="delCashflow(${i})">削除</button></div>`;
+  });
+  $("cfAll").innerHTML = html || `<div class="row"><span class="l2">記録はまだありません</span></div>`;
+  show("cashflow");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="settings"));
 }
 async function saveLcAlert(v){
   S.settings.lcAlert = (v === "on");
@@ -1225,8 +1271,9 @@ function renderHistory(){
     const r = byMonth.get(m), prev = byMonth.get(months[i+1]);
     const d = prev && r.totalAssets!=null && prev.totalAssets!=null
       ? r.totalAssets-prev.totalAssets-netFlowsJpy(prev.date, r.date, r.fx||S.prices.usdjpy) : null;
+    const mFlow = netFlowsJpy(prevMonthEndStr(m), monthEndStr(m), r.fx||S.prices.usdjpy);
     return `<div class="row" onclick="openHistMonth('${m}')"><div><div class="l1 num">${m.replace("-","/")}</div>
-      <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
+      <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}${mFlow? ` ・ <span class="${cls(mFlow)}">入出金 ${sign(mFlow)}</span>`:""}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
       <div class="pct num ${d==null?"":cls(d)}">${d==null?"月損益 —":"月損益 "+sign(d)}</div></div></div>`;
   }).join("");
@@ -1241,7 +1288,9 @@ function openHistMonth(m){
     const prev = h[i-1];
     const d = prev && r.totalAssets!=null && prev.totalAssets!=null
       ? r.totalAssets-prev.totalAssets-netFlowsJpy(prev.date, r.date, r.fx||S.prices.usdjpy) : null;
-    return `<div class="row" onclick="openHistDay('${r.date}')"><div><div class="l1 num" style="font-size:14px">${r.date}</div>
+    const dFlow = (S.settings.cashflows||[]).filter(f=>f.date===r.date)
+      .reduce((a,f)=>a+f.amount*(f.currency==="usd"?(r.fx||S.prices.usdjpy):1),0);
+    return `<div class="row" onclick="openHistDay('${r.date}')"><div><div class="l1 num" style="font-size:14px">${r.date}${dFlow? ` <span class="tag ${cls(dFlow)}">入出金 ${sign(dFlow)}</span>`:""}</div>
       <div class="l2 num">為替 ${r.fx??"—"} ・ N225 ${r.nikkei?fmt(r.nikkei,0):"—"} ・ S&P ${r.sp500?fmt(r.sp500,0):"—"}</div></div>
       <div class="r"><div class="p num">${r.totalAssets==null?"—":yen(r.totalAssets)}</div>
       <div class="pct num ${d==null?"":cls(d)}">${d==null?"":sign(d)}</div></div></div>`;
@@ -1330,6 +1379,7 @@ function renderSettings(){
   $("lcAlert").value = S.settings.lcAlert ? "on" : "off";
   if(!$("cfDate").value) $("cfDate").value = localDate(new Date());
   const fl = S.settings.cashflows || [];
+  $("cfMoreBtn").textContent = `入出金の履歴を見る(全${fl.length}件)`;
   $("cfList").innerHTML = fl.slice(-5).reverse().map((f,ri)=>{
     const i = fl.length-1-ri;
     return `<div class="row"><span class="l2 num">${f.date} ${f.account} ${f.currency==="usd"?"$":"¥"}${fmt(f.amount)}</span>
