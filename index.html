@@ -414,7 +414,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.8";
+const APP_VERSION = "4.9";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1402,6 +1402,16 @@ function parseCsv(text){
 }
 const numOr = v => (v===""||v==null) ? null : (isFinite(+v)? +v : NaN);
 const isDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+// CSV取込用: "2026-07-16" / "2026/07/16" / "2026/7/5" を受理し ISO形式に正規化(不正はnull)
+function normDate(v){
+  const m = String(v??"").trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(!m) return null;
+  const y=+m[1], mo=+m[2], d=+m[3];
+  if(mo<1||mo>12||d<1||d>new Date(y,mo,0).getDate()) return null;
+  return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+}
+// CSV書出用: 日付をスラッシュ区切りに
+const slashDate = v => v ? String(v).replace(/-/g,"/") : v;
 function readFile(input){
   return new Promise((res,rej)=>{
     const f = input.files[0]; if(!f) return rej(new Error("ファイル未選択"));
@@ -1413,7 +1423,8 @@ function readFile(input){
 
 /* ---- トレード ---- */
 function exportTradesCsv(){
-  downloadCsv(toCsv(S.trades.trades, TRADE_COLS), "trades_export.csv");
+  const rows = S.trades.trades.map(t=>({...t, entryDate:slashDate(t.entryDate), exitDate:slashDate(t.exitDate)}));
+  downloadCsv(toCsv(rows, TRADE_COLS), "trades_export.csv");
   toast(`トレード${S.trades.trades.length}件を書き出しました`);
 }
 async function importTradesCsv(input){
@@ -1427,8 +1438,12 @@ async function importTradesCsv(input){
     rows.forEach((r,i)=>{
       const o = {}; TRADE_COLS.forEach((c,j)=>o[c]=r[j]??"");
       const line = i+2;
-      if(!isDate(o.entryDate)) return errs.push(`${line}行目: entryDate が YYYY-MM-DD ではありません`);
-      if(o.exitDate!=="" && !isDate(o.exitDate)) return errs.push(`${line}行目: exitDate が不正`);
+      o.entryDate = normDate(o.entryDate);
+      if(!o.entryDate) return errs.push(`${line}行目: entryDate が不正(YYYY-MM-DD / YYYY/MM/DD)`);
+      if(o.exitDate!==""){
+        o.exitDate = normDate(o.exitDate);
+        if(!o.exitDate) return errs.push(`${line}行目: exitDate が不正`);
+      }
       const qty = numOr(o.qty), ep = numOr(o.entryPrice), xp = numOr(o.exitPrice), sc = numOr(o.score);
       if(!o.code) return errs.push(`${line}行目: code が空`);
       if(!(qty>0) || !(ep>0)) return errs.push(`${line}行目: qty / entryPrice が不正`);
@@ -1463,7 +1478,7 @@ async function exportClosesCsv(){
   const by = S.stockPrices.byDate || {};
   const rows = [];
   Object.keys(by).sort().forEach(d=>{
-    Object.keys(by[d]).sort().forEach(c=>rows.push({date:d, code:c, close:by[d][c]}));
+    Object.keys(by[d]).sort().forEach(c=>rows.push({date:slashDate(d), code:c, close:by[d][c]}));
   });
   if(!rows.length) return toast("終値の記録がまだありません(先に「↻ 最新に更新」を実行してください)");
   downloadCsv(toCsv(rows, CLOSE_COLS), "closes_export.csv");
@@ -1479,9 +1494,9 @@ async function importClosesCsv(input){
     await ensureStockPrices();
     const errs = []; const recs = [];
     rows.forEach((r,i)=>{
-      const [d, code, close] = [r[0]??"", (r[1]??"").trim(), numOr(r[2])];
+      const [d, code, close] = [normDate(r[0]), (r[1]??"").trim(), numOr(r[2])];
       const line = i+2;
-      if(!isDate(d)) return errs.push(`${line}行目: date が YYYY-MM-DD ではありません`);
+      if(!d) return errs.push(`${line}行目: date が不正(YYYY-MM-DD / YYYY/MM/DD)`);
       if(!code) return errs.push(`${line}行目: code が空`);
       if(!(close>0)) return errs.push(`${line}行目: close が正の数ではありません`);
       recs.push([d, code, close]);
@@ -1524,7 +1539,7 @@ async function refetchCloses(){
 /* ---- 入出金CSV (date,account,currency,amount) ---- */
 const CF_COLS = ["date","account","currency","amount"];
 function exportFlowsCsv(){
-  const fl = S.settings.cashflows || [];
+  const fl = (S.settings.cashflows || []).map(f=>({...f, date:slashDate(f.date)}));
   downloadCsv(toCsv(fl, CF_COLS), "cashflows_export.csv");
   toast(`入出金${fl.length}件を書き出しました`);
 }
@@ -1535,9 +1550,9 @@ async function importFlowsCsv(input){
     if(!head || head.join(",")!==CF_COLS.join(",")) return toast("列名が形式と一致しません(date,account,currency,amount)");
     const out=[], errs=[];
     rows.forEach((r,i)=>{
-      const [d,a,c,amt]=[r[0]??"",(r[1]??"").trim(),(r[2]??"").trim(),numOr(r[3])];
+      const [d,a,c,amt]=[normDate(r[0]),(r[1]??"").trim(),(r[2]??"").trim(),numOr(r[3])];
       const line=i+2;
-      if(!isDate(d)) return errs.push(`${line}行目: dateが不正`);
+      if(!d) return errs.push(`${line}行目: dateが不正(YYYY-MM-DD / YYYY/MM/DD)`);
       if(!["SBI","moomoo"].includes(a)) return errs.push(`${line}行目: accountはSBI/moomoo`);
       if(!["jpy","usd"].includes(c)) return errs.push(`${line}行目: currencyはjpy/usd`);
       if(!(amt) || isNaN(amt)) return errs.push(`${line}行目: amountが不正(0以外の数値)`);
@@ -1706,7 +1721,8 @@ async function restoreAll(input){
 
 /* ---- 損益履歴 ---- */
 function exportHistoryCsv(){
-  downloadCsv(toCsv(S.history.history, HIST_COLS), "history_export.csv");
+  const rows = S.history.history.map(r=>({...r, date:slashDate(r.date)}));
+  downloadCsv(toCsv(rows, HIST_COLS), "history_export.csv");
   toast(`損益履歴${S.history.history.length}行を書き出しました`);
 }
 async function importHistoryCsv(input){
@@ -1720,7 +1736,8 @@ async function importHistoryCsv(input){
     rows.forEach((r,i)=>{
       const o = {}; HIST_COLS.forEach((c,j)=>o[c]=r[j]??"");
       const line = i+2;
-      if(!isDate(o.date)) return errs.push(`${line}行目: date が YYYY-MM-DD ではありません`);
+      o.date = normDate(o.date);
+      if(!o.date) return errs.push(`${line}行目: date が不正(YYYY-MM-DD / YYYY/MM/DD)`);
       if(seen.has(o.date)) return errs.push(`${line}行目: date が重複(${o.date})`);
       seen.add(o.date);
       const rec = { date:o.date };
