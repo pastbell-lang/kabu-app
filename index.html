@@ -375,10 +375,10 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     </div>
     <p class="subhead">終値の再取得</p>
     <div class="card">
-      <label>この日以降の銘柄終値をYahoo Financeから取り直して上書き</label>
+      <label>この日以降の銘柄終値・為替・指数(日経/S&P500/NASDAQ/ダウ)を取り直して上書き</label>
       <input type="date" id="refetchFrom">
       <div style="margin-top:10px"><button class="ghost" id="refetchBtn" onclick="refetchCloses()">再取得を実行</button></div>
-      <p class="note" style="margin:8px 0 0">配当調整なしの実際の終値で揃え直します(2〜5分)。細かな手直しは上の「銘柄終値」CSVで行えます。</p>
+      <p class="note" style="margin:8px 0 0">配当調整なしの実際の終値・同日規約で揃え直します(2〜5分)。評価額・資産額の記録は変更しません。細かな手直しは各CSVで行えます。</p>
     </div>
     <p class="subhead">銘柄マスター</p>
     <div class="card">
@@ -414,7 +414,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.9";
+const APP_VERSION = "4.10";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
