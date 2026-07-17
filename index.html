@@ -414,7 +414,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.10";
+const APP_VERSION = "4.11";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1680,6 +1680,82 @@ async function importMasterCsv(input){
 /* ---- 一括バックアップ / リストア ---- */
 const BK_FILES = ["trades.json","history.json","settings.json","marginal_risk.json",
                   "stock_prices.json","master.json","prices.json","alert_state.json"];
+const BK_SCHEMA = 1;               // バックアップ形式の版数
+const BK_MIGRATIONS = {            // 将来、形式の意味が変わる変更を入れた時にここへ変換関数を追加
+  // 例) 1: files => { ...破壊的変更をv2形式へ変換... ; return files; }
+};
+
+// 旧形式のバックアップを現行形式へ引き上げる(A: 版数変換 → B: 既定値補完)
+function normalizeBackup(bk, notes){
+  let sc = bk.schema || 1;
+  while(sc < BK_SCHEMA){
+    if(BK_MIGRATIONS[sc]) bk.files = BK_MIGRATIONS[sc](bk.files);
+    notes.push(`形式v${sc}→v${sc+1}に変換`);
+    sc++;
+  }
+  const f = bk.files;
+  // トレード: 欠損フィールド補完・旧口座名の変換
+  if(f["trades.json"]?.trades){
+    let memoMiss = 0, mooConv = 0;
+    f["trades.json"] = { trades: f["trades.json"].trades.map((t,i)=>{
+      if(t.memo === undefined) memoMiss++;
+      let acct = t.account ?? "SBI日";
+      if(acct === "Moo"){ acct = "moomoo"; mooConv++; }
+      return { id: t.id ?? i+1,
+        entryDate: normDate(t.entryDate) ?? t.entryDate,
+        exitDate: t.exitDate ? (normDate(t.exitDate) ?? t.exitDate) : null,
+        code: String(t.code ?? ""), name: t.name ?? String(t.code ?? ""),
+        account: acct, score: t.score ?? null,
+        entryPrice: t.entryPrice ?? null, exitPrice: t.exitPrice ?? null,
+        qty: t.qty ?? null, memo: t.memo ?? null };
+    })};
+    if(memoMiss) notes.push("メモ列なし→空で補完");
+    if(mooConv) notes.push(`旧口座名Moo→moomoo(${mooConv}件)`);
+  }
+  // 損益履歴: 列の欠損をnull補完
+  if(f["history.json"]?.history){
+    let idxMiss = false;
+    f["history.json"] = { history: f["history.json"].history.map(r=>{
+      const o = {};
+      HIST_COLS.forEach(c=>{ if(r[c] === undefined && (c==="nasdaq"||c==="dow")) idxMiss = true;
+                             o[c] = r[c] ?? null; });
+      o.date = normDate(r.date) ?? r.date;
+      return o;
+    })};
+    if(idxMiss) notes.push("NASDAQ/ダウなし→次回更新で補完");
+  }
+  // 設定: 既定値補完・旧余力形式からの合成
+  {
+    const st = f["settings.json"] || {};
+    if(!st.cash){
+      st.cash = { "SBI": {jpy: st.cashJpy||0, usd: st.cashUsd||0}, "moomoo": {jpy:0, usd:0} };
+      notes.push("旧余力形式→口座別に変換");
+    }
+    if(!Array.isArray(st.cashflows)){ st.cashflows = []; notes.push("入出金の記録なし→空で初期化"); }
+    if(st.lcMode === undefined) st.lcMode = "fixed";
+    if(st.lcRate === undefined) st.lcRate = 5;
+    if(st.lcAlert === undefined) st.lcAlert = false;
+    if(st.capitalGainOffset === undefined) st.capitalGainOffset = 0;
+    const tj = Object.values(st.cash).reduce((a,v)=>a+(v.jpy||0),0);
+    const tu = Object.values(st.cash).reduce((a,v)=>a+(v.usd||0),0);
+    st.cashJpy = tj; st.cashUsd = tu;
+    f["settings.json"] = st;
+  }
+  // 限界リスク表: 構造が壊れていれば復元対象から外す(現行データを維持)
+  const rk = f["marginal_risk.json"];
+  if(rk && !(Array.isArray(rk.winKeys) && Array.isArray(rk.rrKeys) && Array.isArray(rk.values))){
+    f["marginal_risk.json"] = null; notes.push("限界リスク表が不正→現行を維持");
+  }
+  // その他: 器だけ保証
+  if(f["stock_prices.json"] && !f["stock_prices.json"].byDate) f["stock_prices.json"] = {byDate:{}};
+  if(f["master.json"] && !Array.isArray(f["master.json"].jp))
+    f["master.json"] = {updatedAt:null, jp:[], us:[], ...f["master.json"], jp:f["master.json"].jp||[], us:f["master.json"].us||[]};
+  if(f["alert_state.json"] && !Array.isArray(f["alert_state.json"].alerted)) f["alert_state.json"] = {alerted:[]};
+  // 未知のファイルは無視
+  const unknown = Object.keys(f).filter(k=>!BK_FILES.includes(k));
+  if(unknown.length){ unknown.forEach(k=>delete f[k]); notes.push(`不明ファイル${unknown.length}件を無視`); }
+  return bk;
+}
 async function backupAll(){
   try{
     toast("バックアップを作成しています…");
@@ -1688,7 +1764,7 @@ async function backupAll(){
       try{ files[f] = await getRaw(f); }
       catch(e){ files[f] = null; }
     }
-    const bk = { app:"kabu", version: APP_VERSION, exportedAt: new Date().toISOString(), files };
+    const bk = { app:"kabu", schema: BK_SCHEMA, version: APP_VERSION, exportedAt: new Date().toISOString(), files };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(bk)],{type:"application/json"}));
     a.download = `kabu_backup_${localDate(new Date()).replace(/-/g,"")}.json`;
@@ -1700,6 +1776,8 @@ async function restoreAll(input){
   try{
     const bk = JSON.parse(await readFile(input)); input.value="";
     if(bk.app!=="kabu" || !bk.files) return toast("バックアップファイルの形式ではありません");
+    const notes = [];
+    normalizeBackup(bk, notes);
     const tr = bk.files["trades.json"], hi = bk.files["history.json"];
     if(!tr?.trades || !Array.isArray(tr.trades) || !hi?.history) return toast("必須データ(トレード/履歴)が欠けています");
     const summary = `トレード${tr.trades.length}件 / 履歴${hi.history.length}行 / 作成 ${String(bk.exportedAt).slice(0,16).replace("T"," ")}`;
@@ -1715,7 +1793,7 @@ async function restoreAll(input){
     await loadAll();
     S.stockPrices = null; S.master = null; _spDates = null;
     renderHome(); renderMeta(); renderSettings();
-    toast(`復元が完了しました(${done}ファイル)`);
+    toast(`復元が完了しました(${done}ファイル${notes.length?` ・ ${notes[0]}${notes.length>1?` ほか${notes.length-1}件の補完`:""}`:""})`);
   }catch(e){ toast("復元失敗: "+e.message); }
 }
 
