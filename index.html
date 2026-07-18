@@ -209,8 +209,15 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     </div>
   </section>
 
+  <section id="scr-rryear" class="screen">
+    <button class="back" onclick="show('rr')">‹ RR分析に戻る</button>
+    <h2 id="ryTitle"></h2>
+    <div class="list" id="ryList"></div>
+    <p class="note">年計・各月とも、暦の境界(前年末/前月末の終値)から当期末までの損益スライスで勝敗・RR比・限界率を算出。月をタップするとトレード明細へ。</p>
+  </section>
+
   <section id="scr-month" class="screen">
-    <button class="back" onclick="show('rr')">‹ RR分析</button>
+    <button class="back" onclick="show(S.monthBackTo||'rr')">‹ 戻る</button>
     <h2 id="mTitle"></h2>
     <div class="list" id="mList"></div>
   </section>
@@ -441,7 +448,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.15";
+const APP_VERSION = "4.16";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -562,6 +569,103 @@ function rrStats(list){
   const al = losses.length? losses.reduce((a,b)=>a+b)/losses.length : 0;
   return { rr: al? aw/al : null, win: pls.length? wins.length/pls.length : null, n: pls.length };
 }
+// 実売買トレード(加重平均法)から「クリアトレード」を導出。
+// 各銘柄の売買を時系列に並べ、ポジションが動くたびに今回単価で全株クリア→建て直し。
+// 返り値: [{code,name,account,entryDate,entryPrice,exitDate,exitPrice,qty}] (exitDate=null=保有中)
+function buildClearTrades(){
+  // 実売買を「イベント列」に変換: 加重平均トレードは entry と(あれば)exit の2イベントに分解できないため、
+  // ここでは trades.json のレコードを実イベント近似として扱う。
+  // ※案Y前提: trades.json は実売買。買い増し/一部売却も1レコード=1事象として時系列に処理する。
+  const byCode = {};
+  S.trades.trades.forEach(t=>{
+    (byCode[t.code] = byCode[t.code] || []).push(t);
+  });
+  const clears = [];
+  Object.values(byCode).forEach(list=>{
+    // entryDate昇順(同日はexit有無で買い優先)でイベント化
+    const evs = [];
+    list.forEach(t=>{
+      evs.push({kind:"buy", date:t.entryDate, px:t.entryPrice, qty:t.qty,
+                name:t.name, account:t.account, code:t.code});
+      if(t.exitDate) evs.push({kind:"sell", date:t.exitDate, px:t.exitPrice, qty:t.qty,
+                name:t.name, account:t.account, code:t.code});
+    });
+    evs.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.kind==="buy"?-1:1));
+    let pos = null;   // {qty,px,date,name,account,code}
+    evs.forEach(e=>{
+      if(e.kind==="buy"){
+        if(pos){
+          clears.push({code:pos.code,name:pos.name,account:pos.account,
+            entryDate:pos.date,entryPrice:pos.px,exitDate:e.date,exitPrice:e.px,qty:pos.qty});
+          pos = {qty:pos.qty+e.qty, px:e.px, date:e.date, name:e.name, account:e.account, code:e.code};
+        } else {
+          pos = {qty:e.qty, px:e.px, date:e.date, name:e.name, account:e.account, code:e.code};
+        }
+      } else { // sell
+        if(!pos){ pos = {qty:e.qty, px:e.px, date:e.date, name:e.name, account:e.account, code:e.code}; }
+        clears.push({code:pos.code,name:pos.name,account:pos.account,
+          entryDate:pos.date,entryPrice:pos.px,exitDate:e.date,exitPrice:e.px,qty:pos.qty});
+        const remain = pos.qty - e.qty;
+        pos = remain>0 ? {qty:remain, px:e.px, date:e.date, name:e.name, account:e.account, code:e.code} : null;
+      }
+    });
+    if(pos) clears.push({code:pos.code,name:pos.name,account:pos.account,
+      entryDate:pos.date,entryPrice:pos.px,exitDate:null,exitPrice:null,qty:pos.qty});
+  });
+  return clears;
+}
+let _clearTrades = null;
+function clearTrades(){ return _clearTrades || (_clearTrades = buildClearTrades()); }
+
+// クリアトレード1件の損益(円換算)
+function clearPl(t){
+  const p = t.exitDate ? t.exitPrice : (S.prices.prices[String(t.code)] ?? null);
+  if(p==null || t.entryPrice==null || !t.qty) return null;
+  const v = (p - t.entryPrice) * t.qty;
+  return USD(t.account) ? v * S.prices.usdjpy : v;
+}
+function clearRrStats(list){
+  const pls = list.map(clearPl).filter(v=>v!=null);
+  const wins = pls.filter(v=>v>0), losses = pls.filter(v=>v<=0).map(Math.abs);
+  const aw = wins.length? wins.reduce((a,b)=>a+b)/wins.length : 0;
+  const al = losses.length? losses.reduce((a,b)=>a+b)/losses.length : 0;
+  return { rr: al? aw/al : null, win: pls.length? wins.length/pls.length : null, n: pls.length };
+}
+
+// 期間スライスRR: 各実売買トレードを [from, to] 区間で切り出したスライス損益で勝敗集計。
+// from(排他的な建値基準日, null=取得単価から) / to(この日まで, null=現在)
+function sliceStats(fromBoundary, toBoundary){
+  const fx = S.prices.usdjpy;
+  const cur = localDate(new Date()).slice(0,10);
+  const pls = [];
+  S.trades.trades.forEach(t=>{
+    // このトレードが区間に関与するか
+    const entered = t.entryDate;
+    const exited = t.exitDate;
+    // 区間の下限より前に決済済みなら対象外
+    if(fromBoundary && exited && exited <= fromBoundary) return;
+    // 区間の上限より後にエントリーなら対象外
+    if(toBoundary && entered > toBoundary) return;
+    // 建値(startP): 区間開始時点。entryが区間内ならentryPrice、跨ぐならfromBoundary時点の終値
+    let startP;
+    if(!fromBoundary || entered > fromBoundary) startP = t.entryPrice;
+    else startP = priceOnOrBefore(t.code, fromBoundary) ?? t.entryPrice;
+    // 決済値(endP): 区間終了時点。exitが区間内ならexitPrice、跨ぐならtoBoundary時点の終値、保有中は現在値
+    let endP;
+    if(exited && (!toBoundary || exited <= toBoundary)) endP = t.exitPrice;
+    else if(toBoundary) endP = priceOnOrBefore(t.code, toBoundary) ?? startP;
+    else endP = (S.prices.prices[String(t.code)] ?? priceOnOrBefore(t.code, cur)) ?? startP;
+    if(startP==null || endP==null || !t.qty) return;
+    let v = (endP - startP) * t.qty;
+    if(USD(t.account)) v *= fx;
+    pls.push(v);
+  });
+  const wins = pls.filter(v=>v>0), losses = pls.filter(v=>v<=0).map(Math.abs);
+  const aw = wins.length? wins.reduce((a,b)=>a+b)/wins.length : 0;
+  const al = losses.length? losses.reduce((a,b)=>a+b)/losses.length : 0;
+  return { rr: al? aw/al : null, win: pls.length? wins.length/pls.length : null, n: pls.length };
+}
+
 function edateMinus1(d){
   const y = d.getMonth()===0 ? d.getFullYear()-1 : d.getFullYear();
   const m = d.getMonth()===0 ? 11 : d.getMonth()-1;
@@ -1158,40 +1262,78 @@ function renderRR(){
   $("rrView").classList.toggle("hidden", mode!=="rr");
   $("plView").classList.toggle("hidden", mode!=="pl");
   if(mode==="pl"){ renderRealized(); return; }
+  _clearTrades = null;                       // 再計算
+  ensureStockPrices().then(()=>{ _spDates=null; renderRrCards(); renderRrYears(); });
+  renderRrCards();                            // 即時(終値待ちの前に概算表示)
+  renderRrYears();
+}
+function rrCardHtml(lbl, s){
+  const mr = marginalRate(s.rr, s.win);
+  return `<div class="card"><div class="lbl">${lbl}RR比率</div>
+    <div class="val num ${s.rr!=null&&s.rr>=1?"pos":"neg"}">${s.rr==null?"—":s.rr.toFixed(2)}</div>
+    <div class="s num">勝率 ${s.win==null?"—":(s.win*100).toFixed(1)}% ・ ${s.n}件</div>
+    <div class="s num" style="color:var(--ink);font-weight:600">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</div></div>`;
+}
+function renderRrCards(){
+  const ct = clearTrades();
+  const monthAgo = localDate(edateMinus1(new Date(S.prices.updatedAt)));
+  $("rrCards").innerHTML =
+    rrCardHtml("通算", clearRrStats(ct)) +
+    rrCardHtml("直近1カ月", sliceStats(monthAgo, null)) +
+    rrCardHtml("清算済", clearRrStats(ct.filter(t=>t.exitDate))) +
+    rrCardHtml("保有", clearRrStats(ct.filter(t=>!t.exitDate)));
+}
+function yearEndStr(y){ return `${y}-12-31`; }
+function prevYearEndStr(y){ return `${y-1}-12-31`; }
+function renderRrYears(){
   const all = S.trades.trades;
-  const cutoff = edateMinus1(new Date(S.prices.updatedAt));
-  const baskets = [
-    ["通算", all, "保有含む全トレード"],
-    ["直近1カ月", all.filter(t=>new Date(t.entryDate)>cutoff), "エントリー日基準"],
-    ["清算済", all.filter(t=>t.exitDate), "exit済みのみ"],
-    ["保有", all.filter(t=>!t.exitDate), "含み損益ベース"],
-  ];
-  $("rrCards").innerHTML = baskets.map(([lbl,list,sub])=>{
-    const s = rrStats(list), mr = marginalRate(s.rr, s.win);
-    return `<div class="card"><div class="lbl">${lbl}RR比率</div>
-      <div class="val num ${s.rr!=null&&s.rr>=1?"pos":"neg"}">${s.rr==null?"—":s.rr.toFixed(2)}</div>
-      <div class="s num">勝率 ${s.win==null?"—":(s.win*100).toFixed(1)}% ・ ${s.n}件</div>
-      <div class="s num" style="color:var(--ink);font-weight:600">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</div>
-      <div class="s">${sub}</div></div>`;
-  }).join("");
-  const map = new Map();
-  all.forEach(t=>{ const k=t.entryDate.slice(0,7); (map.get(k)??map.set(k,[]).get(k)).push(t); });
-  const months = [...map.keys()].sort().reverse().slice(0,18);
-  const maxRR = 3;
-  $("rrMonths").innerHTML = months.map(m=>{
-    const s = rrStats(map.get(m));
-    const w = s.rr==null?0:Math.min(s.rr/maxRR,1)*100;
-    const col = s.rr!=null&&s.rr>=1 ? "var(--up)":"var(--down)";
+  if(!all.length){ $("rrMonths").innerHTML = ""; return; }
+  const y0 = Math.min(...all.map(t=>+t.entryDate.slice(0,4)));
+  const y1 = +localDate(new Date()).slice(0,4);
+  const years = [];
+  for(let y=y1; y>=y0; y--) years.push(y);
+  $("rrMonths").innerHTML = `<p class="subhead" style="margin:8px 2px 4px">年毎のRR比率(タップで月毎へ)</p>` +
+    years.map(y=>{
+      const s = sliceStats(prevYearEndStr(y), yearEndStr(y));
+      if(!s.n) return "";
+      const mr = marginalRate(s.rr, s.win);
+      const col = s.rr!=null&&s.rr>=1?"var(--up)":"var(--down)";
+      return `<div class="row" onclick="openRrYear(${y})" style="gap:10px">
+        <span class="num" style="font-size:14px;width:64px">${y}年 ›</span>
+        <span class="num" style="font-size:14px;width:44px;text-align:right;color:${col}">${s.rr==null?"—":s.rr.toFixed(2)}</span>
+        <span style="flex:1;text-align:right">
+          <span class="num" style="font-size:11px;color:var(--sub);display:block">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}件</span>
+          <span class="num" style="font-size:11px;display:block">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</span>
+        </span></div>`;
+    }).join("");
+}
+async function openRrYear(y){
+  S.rrYear = y;
+  await ensureStockPrices(); _spDates=null;
+  const yStat = sliceStats(prevYearEndStr(y), yearEndStr(y));
+  const yMr = marginalRate(yStat.rr, yStat.win);
+  const rowHtml = (label, s, bold) => {
     const mr = marginalRate(s.rr, s.win);
-    return `<div class="row" onclick="openMonth('${m}')" style="gap:10px">
-      <span class="num" style="font-size:13px;width:62px">${m.replace("-","/")}</span>
-      <span class="bar"><i style="width:${w}%;background:${col}"></i></span>
-      <span class="num" style="font-size:13px;width:38px;text-align:right">${s.rr==null?"—":s.rr.toFixed(2)}</span>
-      <span style="width:80px;text-align:right">
-        <span class="num" style="font-size:11px;color:var(--sub);display:block">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}</span>
+    const col = s.rr!=null&&s.rr>=1?"var(--up)":"var(--down)";
+    return `<div class="row"${bold?' style="background:var(--bg);font-weight:600"':''}>
+      <span class="num" style="font-size:13px;width:70px">${label}</span>
+      <span class="num" style="font-size:13px;width:44px;text-align:right;color:${col}">${s.rr==null?"—":s.rr.toFixed(2)}</span>
+      <span style="flex:1;text-align:right">
+        <span class="num" style="font-size:11px;color:var(--sub);display:block">勝率 ${s.win==null?"—":(s.win*100).toFixed(0)+"%"} ・ ${s.n}件</span>
         <span class="num" style="font-size:11px;display:block">限界率 ${mr==null?"—":(mr*100).toFixed(1)+"%"}</span>
       </span></div>`;
-  }).join("");
+  };
+  let html = rowHtml("年計", yStat, true);
+  for(let mo=12; mo>=1; mo--){
+    const m = `${y}-${String(mo).padStart(2,"0")}`;
+    const s = sliceStats(prevMonthEndStr(m), monthEndStr(m));
+    if(!s.n) continue;
+    html += `<div onclick="S.monthBackTo='rryear'; openMonth('${m}')">` + rowHtml(m.replace("-","/"), s, false) + `</div>`;
+  }
+  $("ryTitle").textContent = `${y}年 月毎のRR比率`;
+  $("ryList").innerHTML = html;
+  show("rryear");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="rr"));
 }
 function monthEndStr(m){          // "YYYY-MM" → 月末日 "YYYY-MM-DD"
   const [y,mo] = m.split("-").map(Number);
