@@ -180,6 +180,9 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
         <div><label>売却日</label><input type="date" id="exDate"></div>
         <div><label>売却単価 <span id="exUnit"></span></label><input type="number" inputmode="decimal" step="any" id="exPrice"></div>
       </div>
+      <div style="margin-top:8px">
+        <label>売却時のメモ(任意)</label><input id="exMemo" autocomplete="off" placeholder="目標到達で利確">
+      </div>
       <div style="margin-top:14px"><button class="primary" onclick="doExit()">売却を確定する</button></div>
     </div>
     <div style="margin-top:10px" class="grid2">
@@ -247,6 +250,21 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
     <button class="back" onclick="show('history')">‹ 月別一覧</button>
     <h2 id="hdTitle"></h2>
     <div class="list" id="hdList"></div>
+  </section>
+
+  <section id="scr-closed" class="screen">
+    <button class="back" onclick="show('month')">‹ 戻る</button>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <h2 id="cName" style="margin:0"></h2><span class="note" id="cAcct"></span>
+    </div>
+    <div class="bigprice num" id="cPrice">—</div>
+    <div class="num" id="cPl" style="font-size:14px;margin-bottom:10px"></div>
+    <div class="card"><table class="kv" id="cTable"></table></div>
+    <div class="card hidden" id="cChartWrap">
+      <p class="note" style="margin:0 0 6px">終値推移(取得日〜売却日)</p>
+      <canvas id="cChart" width="640" height="300" style="width:100%"></canvas>
+    </div>
+    <p class="note" style="text-align:center">この画面は参照専用です(入力・変更はできません)</p>
   </section>
 
   <section id="scr-cashflow" class="screen">
@@ -423,7 +441,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.13";
+const APP_VERSION = "4.14";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -581,7 +599,7 @@ function showSug(items){
 }
 function pickSug(code){
   const hit = masterList().find(([c])=>c===code);
-  if(hit){ $("inCode").value = hit[0]; $("inName").value = hit[1]; }
+  if(hit){ $("inCode").value = hit[0]; $("inName").value = hit[1]; prefillEntryPrice(hit[0]); }
   hideSug();
 }
 function onCodeInput(){
@@ -589,8 +607,25 @@ function onCodeInput(){
   if(!v) return hideSug();
   const list = masterList();
   const exact = list.find(([c])=>c===v);
-  if(exact){ $("inName").value = exact[1]; hideSug(); return; }
+  if(exact){ $("inName").value = exact[1]; hideSug(); prefillEntryPrice(v); return; }
   showSug(list.filter(([c])=>c.startsWith(v)));
+  prefillEntryPrice(v);
+}
+// 新規登録で取得単価が空欄のとき、その銘柄の最終更新時の株価を初期値にセット
+async function prefillEntryPrice(code){
+  if(S.editingId || $("inPrice").value !== "") return;
+  const live = S.prices.prices[code];
+  if(live != null){ if($("inCode").value.trim().toUpperCase()===code && $("inPrice").value==="") $("inPrice").value = live; return; }
+  await ensureStockPrices();
+  const by = S.stockPrices.byDate || {};
+  const dates = Object.keys(by).sort();
+  for(let i=dates.length-1; i>=0; i--){
+    if(by[dates[i]][code] != null){
+      if($("inCode").value.trim().toUpperCase()===code && $("inPrice").value==="")
+        $("inPrice").value = by[dates[i]][code];
+      return;
+    }
+  }
 }
 function onNameInput(){
   const v = $("inName").value.trim();
@@ -926,14 +961,44 @@ async function openDetail(id){
     [lcLabel()+"ライン", (u?"$":"¥")+fmt(t.entryPrice*(1-currentLcRate()))],
     ["保有日数", days+"日"],
     ["点数", t.score??"—"],
-    ...(t.memo ? [["メモ", t.memo]] : []),
+    ...(t.memo ? [["メモ(登録時)", t.memo]] : []),
   ].map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("");
   $("exUnit").textContent = u? "($)" : "(円)";
   $("exDate").value = bizDate(t.account);
   $("exPrice").value = p??"";
+  $("exMemo").value = "";
   show("detail");
   drawStockChart(t);
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.s==="home"));
+}
+async function openClosedDetail(id){
+  const t = S.trades.trades.find(x=>x.id===id); if(!t || !t.exitDate) return;
+  S.closedId = id;
+  const u = USD(t.account), sym = u?"$":"¥";
+  const pl = plOf(t);
+  $("cName").textContent = dispName(t);
+  $("cAcct").textContent = t.account + " ・ 清算済み";
+  $("cPrice").textContent = "売却 " + sym + fmt(t.exitPrice, u?2:1);
+  if(pl!=null && t.entryPrice){
+    const pct=(t.exitPrice/t.entryPrice-1)*100;
+    $("cPl").textContent = `確定損益 ${sign(pl)} 円(${(pct>=0?"+":"−")+Math.abs(pct).toFixed(1)}%)`;
+    $("cPl").className = "num "+cls(pl);
+  } else { $("cPl").textContent=""; }
+  const days = Math.round((new Date(t.exitDate)-new Date(t.entryDate))/864e5);
+  const lcr = currentLcRate();
+  $("cTable").innerHTML = [
+    ["取得日 / 取得単価", `${t.entryDate} / ${sym}${fmt(t.entryPrice)}`],
+    ["売却日 / 売却単価", `${t.exitDate} / ${sym}${fmt(t.exitPrice)}`],
+    ["株数", fmt(t.qty,0)],
+    ["保有日数", days+"日"],
+    [lcLabel()+"ライン", sym+fmt(t.entryPrice*(1-lcr))],
+    ["点数", t.score??"—"],
+    ["メモ(登録時)", t.memo??"—"],
+    ["メモ(売却時)", t.exitMemo??"—"],
+  ].map(([k,v])=>`<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("");
+  show("closed");
+  drawStockChart(t, {canvas:"cChart", wrap:"cChartWrap", guard:()=>S.closedId===id});
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on", b.dataset.s==="rr"));
 }
 async function doExit(){
   const t = S.trades.trades.find(x=>x.id===S.detailId);
@@ -941,6 +1006,7 @@ async function doExit(){
   if(!d || !(p>0)) return toast("売却日と売却単価を入力してください");
   if(!confirm(`${dispName(t)} を ${d} に ${p} で売却として確定します。よろしいですか?`)) return;
   t.exitDate = d; t.exitPrice = p;
+  t.exitMemo = $("exMemo").value.trim() || null;
   await saveTrades(`exit ${t.code}`);
   toast("売却を記録しました"); show("home");
 }
@@ -966,18 +1032,26 @@ async function delTrade(){
   toast("削除しました"); show("home");
 }
 
-async function drawStockChart(t){
-  $("dChartWrap").classList.add("hidden");
+async function drawStockChart(t, opt){
+  const cvId = opt?.canvas || "dChart", wrapId = opt?.wrap || "dChartWrap";
+  const guard = opt?.guard || (()=>S.detailId===t.id);
+  $(wrapId).classList.add("hidden");
   await ensureStockPrices();
   const by = S.stockPrices.byDate || {};
   const code = String(t.code);
+  const closed = !!t.exitDate;
   const pts = Object.keys(by).sort()
-    .filter(d=>d>=t.entryDate && by[d][code]!=null)
+    .filter(d=>d>=t.entryDate && (!closed || d<=t.exitDate) && by[d][code]!=null)
     .map(d=>({d, v:by[d][code]}));
-  const live = priceOf(t);
-  if(live!=null && (!pts.length || pts[pts.length-1].v!==live)) pts.push({d:"now", v:live});
-  if(pts.length < 2 || S.detailId !== t.id) return;
-  const c = $("dChart"), ctx = c.getContext("2d");
+  if(closed){
+    if(!pts.length || pts[pts.length-1].d!==t.exitDate || pts[pts.length-1].v!==t.exitPrice)
+      pts.push({d:t.exitDate, v:t.exitPrice});
+  } else {
+    const live = priceOf(t);
+    if(live!=null && (!pts.length || pts[pts.length-1].v!==live)) pts.push({d:"now", v:live});
+  }
+  if(pts.length < 2 || !guard()) return;
+  const c = $(cvId), ctx = c.getContext("2d");
   ctx.clearRect(0,0,c.width,c.height);
   const vals = pts.map(p=>p.v);
   const lcr = currentLcRate();
@@ -985,7 +1059,25 @@ async function drawStockChart(t){
   const pad = 46;
   const X = i => pad + (c.width-2*pad)*i/(pts.length-1);
   const Y = v => c.height-pad - (c.height-2*pad)*(v-lo)/((hi-lo)||1);
-  // 取得単価(点線・グレー)とLC5%ライン(点線・赤)
+  // 月跨ぎ線(毎月1日の位置に縦点線+月名)
+  {
+    const monthOf = d => d==="now" ? null : d.slice(0,7);
+    const bounds = [];
+    for(let i=1;i<pts.length;i++){
+      const m0 = monthOf(pts[i-1].d), m1 = monthOf(pts[i].d);
+      if(m0 && m1 && m1 !== m0) bounds.push({i, label: String(+m1.slice(5,7))+"月"});
+    }
+    ctx.setLineDash([3,5]); ctx.strokeStyle=cssVar("--chart-text"); ctx.lineWidth=1; ctx.globalAlpha=.55;
+    bounds.forEach(b=>{
+      ctx.beginPath(); ctx.moveTo(X(b.i), 8); ctx.lineTo(X(b.i), c.height-pad+6); ctx.stroke();
+    });
+    ctx.globalAlpha=1; ctx.setLineDash([]);
+    if(bounds.length<=6){
+      ctx.fillStyle=cssVar("--chart-text"); ctx.font="17px sans-serif";
+      bounds.forEach(b=>ctx.fillText(b.label, X(b.i)+4, 22));
+    }
+  }
+  // 取得単価(点線・グレー)とLCライン(点線・赤)
   ctx.setLineDash([6,6]);
   ctx.strokeStyle=cssVar("--chart-entry"); ctx.lineWidth=1.2;
   ctx.beginPath(); ctx.moveTo(pad,Y(t.entryPrice)); ctx.lineTo(c.width-pad,Y(t.entryPrice)); ctx.stroke();
@@ -999,13 +1091,28 @@ async function drawStockChart(t){
   ctx.fillStyle=cssVar("--chart-main");
   const last = pts[pts.length-1];
   ctx.beginPath(); ctx.arc(X(pts.length-1), Y(last.v), 5, 0, 7); ctx.fill();
+  // LC割れ交差(清算済みのみ): 最初にLCラインを下回った日
+  if(closed){
+    const lcv = t.entryPrice*(1-lcr);
+    const ci = pts.findIndex(p=>p.v < lcv);
+    if(ci >= 0){
+      ctx.strokeStyle=cssVar("--down"); ctx.lineWidth=2.4;
+      ctx.beginPath(); ctx.arc(X(ci), Y(pts[ci].v), 7, 0, 7); ctx.stroke();
+      ctx.fillStyle=cssVar("--down"); ctx.font="17px sans-serif"; ctx.textAlign="center";
+      const dd = pts[ci].d;
+      ctx.fillText(`${+dd.slice(5,7)}/${dd.slice(8,10)} LC割れ`, Math.min(Math.max(X(ci), 70), c.width-70), c.height-8);
+      ctx.textAlign="left";
+    }
+  }
   ctx.fillStyle=cssVar("--chart-text"); ctx.font="19px sans-serif";
   const u = USD(t.account);
   ctx.fillText(fmt(hi, u?2:0), 4, Y(hi)+7);
   ctx.fillText(fmt(lo, u?2:0), 4, Y(lo)+7);
   ctx.fillText(t.entryDate.slice(2), pad, c.height-8);
-  ctx.textAlign="right"; ctx.fillText("現在", c.width-8, c.height-8); ctx.textAlign="left";
-  $("dChartWrap").classList.remove("hidden");
+  ctx.textAlign="right";
+  ctx.fillText(closed ? t.exitDate.slice(2) : "現在", c.width-8, c.height-8);
+  ctx.textAlign="left";
+  $(wrapId).classList.remove("hidden");
 }
 
 /* ================= 入力 ================= */
@@ -1033,7 +1140,7 @@ async function saveTrade(){
   } else {
     const id = Math.max(0,...S.trades.trades.map(t=>t.id)) + 1;
     S.trades.trades.push({id,entryDate:d,exitDate:null,code,name:name||code,account:S.acct,
-      score,entryPrice:price,exitPrice:null,qty,memo});
+      score,entryPrice:price,exitPrice:null,qty,memo,exitMemo:null});
     await saveTrades(`add ${code}`);
     toast(`${name||code} を登録しました。次回更新から株価を取得します`);
     resetInputForm(); show("home");
@@ -1186,11 +1293,12 @@ async function openPlMonth(m){
   $("mTitle").textContent = `${m.replace("-","/")} の月次損益(${items.length}銘柄)`;
   $("mList").innerHTML = items.map(({t,pl,startP,endP})=>{
     const u = USD(t.account), sym = u?"$":"¥";
+    const oc = t.exitDate ? `openClosedDetail(${t.id})` : `openDetail(${t.id})`;
     const tags = [t.account];
     if(t.entryDate.slice(0,7)===m) tags.push("月中エントリー");
     if(t.exitDate && t.exitDate.slice(0,7)===m) tags.push("月中売却");
     else if(!t.exitDate && m===curMonth) tags.push("保有中");
-    return `<div class="row"><div><div class="l1">${dispName(t)}<span class="tag">${tags.join(" ・ ")}</span></div>
+    return `<div class="row" onclick="${oc}"><div><div class="l1">${dispName(t)}<span class="tag">${tags.join(" ・ ")}</span></div>
       <div class="l2 num">${sym}${fmt(startP, u?2:1)} → ${sym}${fmt(endP, u?2:1)} × ${fmt(t.qty,0)}</div></div>
       <div class="r"><div class="p num ${cls(pl)}">${sign(pl)}</div></div></div>`;
   }).join("");
@@ -1206,7 +1314,7 @@ function openMonth(m, mode="entry"){
     const pl = plOf(t), u = USD(t.account), sym = u?"$":"¥";
     const extra = [ (t.score!=null && t.score!=="") ? `点数 ${t.score}` : null, t.memo || null ]
       .filter(Boolean).join(" ・ ");
-    return `<div class="row" ${t.exitDate?"":`onclick="openDetail(${t.id})"`}><div>
+    return `<div class="row" onclick="${t.exitDate?`openClosedDetail(${t.id})`:`openDetail(${t.id})`}"><div>
       <div class="l1">${dispName(t)}<span class="tag">${t.account}${t.exitDate?"":" ・ 保有中"}</span></div>
       <div class="l2 num">${t.entryDate} ${sym}${fmt(t.entryPrice)} → ${t.exitDate??"保有中"}${t.exitDate&&t.exitPrice?" "+sym+fmt(t.exitPrice):""}</div>
       ${extra?`<div class="l2" style="margin-top:2px">${extra}</div>`:""}</div>
@@ -1424,7 +1532,8 @@ async function saveSettings(){
   catch(e){ toast("保存に失敗: "+e.message); }
 }
 /* ---- CSV 共通 ---- */
-const TRADE_COLS = ["id","entryDate","exitDate","code","name","account","score","entryPrice","exitPrice","qty","memo"];
+const TRADE_COLS = ["id","entryDate","exitDate","code","name","account","score","entryPrice","exitPrice","qty","memo","exitMemo"];
+const TRADE_COLS_V1 = TRADE_COLS.slice(0,-1);   // 旧形式(exitMemoなし)も受理
 const HIST_COLS  = ["date","fx","evaluation","cashJpy","cashUsd","totalAssets","invested","capitalGain","nikkei","sp500","nasdaq","dow"];
 function csvEscape(v){ v = v==null? "" : String(v); return /[",\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
 function toCsv(rows, cols){
@@ -1483,11 +1592,13 @@ async function importTradesCsv(input){
     const rows = parseCsv(await readFile(input));
     input.value = "";
     const head = rows.shift();
-    if(!head || head.join(",") !== TRADE_COLS.join(","))
+    const cols = head && head.join(",")===TRADE_COLS.join(",") ? TRADE_COLS
+               : head && head.join(",")===TRADE_COLS_V1.join(",") ? TRADE_COLS_V1 : null;
+    if(!cols)
       return toast("列名が形式と一致しません。書き出したCSVと同じ列でお願いします");
     const out = []; const errs = [];
     rows.forEach((r,i)=>{
-      const o = {}; TRADE_COLS.forEach((c,j)=>o[c]=r[j]??"");
+      const o = {}; cols.forEach((c,j)=>o[c]=r[j]??""); o.exitMemo = o.exitMemo ?? "";
       const line = i+2;
       o.entryDate = normDate(o.entryDate);
       if(!o.entryDate) return errs.push(`${line}行目: entryDate が不正(YYYY-MM-DD / YYYY/MM/DD)`);
@@ -1501,7 +1612,7 @@ async function importTradesCsv(input){
       if(o.exitDate!=="" && !(xp>0)) return errs.push(`${line}行目: exit済みなのに exitPrice が不正`);
       out.push({ id:0, entryDate:o.entryDate, exitDate:o.exitDate||null, code:String(o.code).trim(),
         name:o.name||String(o.code), account:o.account||"SBI日", score:(sc===null||isNaN(sc))?null:sc,
-        entryPrice:ep, exitPrice:o.exitDate?xp:null, qty:qty, memo:o.memo||null });
+        entryPrice:ep, exitPrice:o.exitDate?xp:null, qty:qty, memo:o.memo||null, exitMemo:o.exitMemo||null });
     });
     if(errs.length) return toast("取り込み中止: "+errs[0]+(errs.length>1?` ほか${errs.length-1}件`:""));
     if(!out.length) return toast("有効な行がありません");
@@ -1759,7 +1870,7 @@ function normalizeBackup(bk, notes){
         code: String(t.code ?? ""), name: t.name ?? String(t.code ?? ""),
         account: acct, score: t.score ?? null,
         entryPrice: t.entryPrice ?? null, exitPrice: t.exitPrice ?? null,
-        qty: t.qty ?? null, memo: t.memo ?? null };
+        qty: t.qty ?? null, memo: t.memo ?? null, exitMemo: t.exitMemo ?? null };
     })};
     if(memoMiss) notes.push("メモ列なし→空で補完");
     if(mooConv) notes.push(`旧口座名Moo→moomoo(${mooConv}件)`);
