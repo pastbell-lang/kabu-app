@@ -448,7 +448,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.16";
+const APP_VERSION = "4.17";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -637,6 +637,7 @@ function clearRrStats(list){
 function sliceStats(fromBoundary, toBoundary){
   const fx = S.prices.usdjpy;
   const cur = localDate(new Date()).slice(0,10);
+  if(fromBoundary && fromBoundary >= cur) return {rr:null, win:null, n:0};   // まだ始まっていない期間
   const pls = [];
   S.trades.trades.forEach(t=>{
     // このトレードが区間に関与するか
@@ -1324,8 +1325,10 @@ async function openRrYear(y){
       </span></div>`;
   };
   let html = rowHtml("年計", yStat, true);
+  const curMonth = localDate(new Date()).slice(0,7);   // 未来の月は表示しない
   for(let mo=12; mo>=1; mo--){
     const m = `${y}-${String(mo).padStart(2,"0")}`;
+    if(m > curMonth) continue;
     const s = sliceStats(prevMonthEndStr(m), monthEndStr(m));
     if(!s.n) continue;
     html += `<div onclick="S.monthBackTo='rryear'; openMonth('${m}')">` + rowHtml(m.replace("-","/"), s, false) + `</div>`;
