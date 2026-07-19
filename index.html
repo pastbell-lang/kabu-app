@@ -457,7 +457,7 @@ canvas{width:100%;height:190px;background:var(--card);border:0.5px solid var(--l
 
 <script>
 "use strict";
-const APP_VERSION = "4.18";
+const APP_VERSION = "4.19";
 const APP_DATE = "2026-07-15";
 /* ================= 状態 ================= */
 const S = { trades:null, prices:null, history:null, settings:null, risk:null,
@@ -1516,29 +1516,44 @@ function drawRelChart(cvId, rows, touchIdx){
   ctx.fillText(rows[0].date.slice(2), pad, c.height-8);
   ctx.textAlign="right"; ctx.fillText(rows[rows.length-1].date.slice(2), c.width-8, c.height-8);
   ctx.textAlign="left";
-  // タッチ追従の十字線(資産系列基準)
+  // タッチ追従(クロス線+吹き出し: 日付大きめ+資産額+相対値)
   if(touchIdx!=null && touchIdx>=0 && touchIdx<rows.length){
     const i = touchIdx, x = X(i);
-    ctx.strokeStyle = cssVar("--ink"); ctx.lineWidth = 1.6; ctx.globalAlpha = .85;
-    ctx.beginPath(); ctx.moveTo(x, 26); ctx.lineTo(x, c.height-pad+6); ctx.stroke();
-    ctx.globalAlpha = 1;
     const av = rel[0][i];
+    const boxH = 52;
+    // クロス線(縦+横)。交点は資産系列の位置
+    ctx.strokeStyle = cssVar("--ink"); ctx.lineWidth = 1.6; ctx.globalAlpha = .8;
+    ctx.beginPath(); ctx.moveTo(x, boxH+2); ctx.lineTo(x, c.height-pad+6); ctx.stroke();
+    if(av!=null){
+      ctx.beginPath(); ctx.moveTo(pad-6, Y(av)); ctx.lineTo(c.width-pad+6, Y(av)); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     if(av!=null){
       ctx.fillStyle = series[0].color;
       ctx.beginPath(); ctx.arc(x, Y(av), 7, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, Y(av), 7, 0, 7); ctx.stroke();
     }
-    const d = rows[i].date.replace(/-/g,"/");
-    const label = `${d} ・ 資産 ${av==null?"—":av.toFixed(1)}`;
+    // 吹き出し(2行): 1行目=日付(大)、2行目=資産額(円)+相対値
+    const dTxt = rows[i].date.replace(/-/g,"/");
+    const ta = rows[i].totalAssets;
+    const aTxt = `資産 ${ta==null? "—" : yen(ta)}${av==null? "" : ` (${av.toFixed(1)})`}`;
+    ctx.font = "bold 26px sans-serif";
+    const w1 = ctx.measureText(dTxt).width;
     ctx.font = "20px sans-serif";
-    const tw = ctx.measureText(label).width + 20;
-    let bx = Math.min(Math.max(x - tw/2, 2), c.width - tw - 2);
+    const w2 = ctx.measureText(aTxt).width;
+    const tw = Math.max(w1, w2) + 24;
+    const bx = Math.min(Math.max(x - tw/2, 2), c.width - tw - 2);
     ctx.fillStyle = cssVar("--chart-main");
     ctx.beginPath();
-    if(ctx.roundRect) ctx.roundRect(bx, 0, tw, 26, 6); else ctx.rect(bx, 0, tw, 26);
+    if(ctx.roundRect) ctx.roundRect(bx, 0, tw, boxH, 7); else ctx.rect(bx, 0, tw, boxH);
     ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.textAlign="center";
-    ctx.fillText(label, bx + tw/2, 19);
-    ctx.textAlign="left";
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+    ctx.font = "bold 26px sans-serif";
+    ctx.fillText(dTxt, bx + tw/2, 24);
+    ctx.font = "20px sans-serif";
+    ctx.fillText(aTxt, bx + tw/2, 46);
+    ctx.textAlign = "left";
   }
   return true;
 }
